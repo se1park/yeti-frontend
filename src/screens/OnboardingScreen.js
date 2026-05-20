@@ -1,7 +1,79 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import * as AuthSession from 'expo-auth-session';
+import * as WebBrowser from 'expo-web-browser';
 import { PrimaryButton, SecondaryButton } from '../components/ui';
 import { BLUE, INK, LINE, MUTED } from '../data/yetiData';
+
+WebBrowser.maybeCompleteAuthSession();
+
+const googleClientId = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID || '';
+const kakaoRestApiKey = process.env.EXPO_PUBLIC_KAKAO_REST_API_KEY || '';
+const kakaoClientSecret = process.env.EXPO_PUBLIC_KAKAO_CLIENT_SECRET || '';
+const googleRedirectUri = process.env.EXPO_PUBLIC_GOOGLE_REDIRECT_URI || AuthSession.makeRedirectUri({ path: 'oauth/google/callback' });
+const kakaoRedirectUri = process.env.EXPO_PUBLIC_KAKAO_REDIRECT_URI || AuthSession.makeRedirectUri({ path: 'oauth/kakao/callback' });
+const googleDiscovery = {
+  authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+};
+const kakaoDiscovery = {
+  authorizationEndpoint: 'https://kauth.kakao.com/oauth/authorize',
+  tokenEndpoint: 'https://kauth.kakao.com/oauth/token',
+};
+
+function getEmailName(email) {
+  return typeof email === 'string' && email.includes('@') ? email.split('@')[0] : '';
+}
+
+function cleanUsername(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 20);
+}
+
+function getOnboardingDefaults(session) {
+  const user = session?.user || {};
+  const emailName = getEmailName(user.email);
+  const rawUsername = user.username || user.preferred_username || emailName || user.sub || '';
+  const username = cleanUsername(rawUsername) || 'user';
+  const nickname = user.nickname || user.name || user.displayName || emailName || username;
+
+  return { username, nickname };
+}
+
+async function exchangeKakaoCode(code) {
+  const body = new URLSearchParams({
+    grant_type: 'authorization_code',
+    client_id: kakaoRestApiKey,
+    redirect_uri: kakaoRedirectUri,
+    code,
+  });
+
+  if (kakaoClientSecret) {
+    body.set('client_secret', kakaoClientSecret);
+  }
+
+  const response = await fetch(kakaoDiscovery.tokenEndpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8',
+    },
+    body: body.toString(),
+  });
+  const payload = await response.json();
+
+  if (!response.ok || !payload.access_token) {
+    if (payload.error === 'invalid_client') {
+      throw new Error('Kakao REST API 키 또는 client secret이 올바르지 않습니다. 카카오 콘솔의 REST API 키와 Client Secret 사용 여부를 확인해주세요.');
+    }
+    throw new Error(payload.error_description || payload.error || 'Kakao 토큰을 받을 수 없습니다.');
+  }
+
+  return payload.access_token;
+}
 
 function Logo({ size = 64 }) {
   return (
@@ -28,13 +100,32 @@ export function IntroScreen({ onNext }) {
   );
 }
 
-export function LoginScreen({ busy, error, notice, onEmailLogin, onKakao, onOAuth, onSignup }) {
+export function LoginScreen({ busy, error, notice, onEmailLogin, onOAuth, onSignup }) {
   const [mode, setMode] = useState('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
   const [nickname, setNickname] = useState('');
-  const [googleToken, setGoogleToken] = useState('');
+  const [socialError, setSocialError] = useState('');
+  const exchangedKakaoCodes = useRef(new Set());
+  const googleConfig = useMemo(() => ({
+    clientId: googleClientId || 'missing-google-client-id',
+    redirectUri: googleRedirectUri,
+    responseType: AuthSession.ResponseType.IdToken,
+    scopes: ['openid', 'profile', 'email'],
+    extraParams: {
+      nonce: `yeti-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    },
+    usePKCE: false,
+  }), []);
+  const kakaoConfig = useMemo(() => ({
+    clientId: kakaoRestApiKey || 'missing-kakao-rest-api-key',
+    redirectUri: kakaoRedirectUri,
+    responseType: AuthSession.ResponseType.Code,
+    usePKCE: false,
+  }), []);
+  const [, googleResponse, promptGoogle] = AuthSession.useAuthRequest(googleConfig, googleDiscovery);
+  const [, kakaoResponse, promptKakao] = AuthSession.useAuthRequest(kakaoConfig, kakaoDiscovery);
 
   const submit = () => {
     if (busy) return;
@@ -45,6 +136,71 @@ export function LoginScreen({ busy, error, notice, onEmailLogin, onKakao, onOAut
     }
 
     onEmailLogin({ email, password });
+  };
+
+  useEffect(() => {
+    if (!googleResponse) return;
+
+    const googleToken = googleResponse.params?.id_token;
+
+    if (googleResponse.type === 'success' && googleToken) {
+      onOAuth('google', googleToken);
+      return;
+    }
+
+    if (googleResponse.type === 'success' && !googleToken) {
+      setSocialError('Google ID 토큰을 받지 못했습니다. OAuth 클라이언트 설정을 확인해주세요.');
+      return;
+    }
+
+    if (googleResponse.type === 'error') {
+      setSocialError('Google 로그인이 취소되었거나 실패했습니다.');
+    }
+  }, [googleResponse]);
+
+  useEffect(() => {
+    if (!kakaoResponse) return;
+
+    const runKakaoRestLogin = async () => {
+      if (kakaoResponse.type === 'error') {
+        setSocialError('Kakao 로그인이 취소되었거나 실패했습니다.');
+        return;
+      }
+
+      const kakaoCode = kakaoResponse.params?.code;
+      if (kakaoResponse.type !== 'success' || !kakaoCode) return;
+      if (exchangedKakaoCodes.current.has(kakaoCode)) return;
+      exchangedKakaoCodes.current.add(kakaoCode);
+
+      try {
+        const kakaoAccessToken = await exchangeKakaoCode(kakaoCode);
+        onOAuth('kakao', kakaoAccessToken);
+      } catch (kakaoError) {
+        setSocialError(kakaoError.message || 'Kakao 토큰 교환에 실패했습니다.');
+      }
+    };
+
+    runKakaoRestLogin();
+  }, [kakaoResponse]);
+
+  const startSocialLogin = async (provider) => {
+    if (busy) return;
+    setSocialError('');
+
+    if (provider === 'google') {
+      if (!googleClientId) {
+        setSocialError('EXPO_PUBLIC_GOOGLE_CLIENT_ID를 .env에 설정해주세요.');
+        return;
+      }
+      await promptGoogle();
+      return;
+    }
+
+    if (!kakaoRestApiKey) {
+      setSocialError('EXPO_PUBLIC_KAKAO_REST_API_KEY를 .env에 설정해주세요.');
+      return;
+    }
+    await promptKakao();
   };
 
   return (
@@ -74,26 +230,32 @@ export function LoginScreen({ busy, error, notice, onEmailLogin, onKakao, onOAut
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
         {notice ? <Text style={styles.noticeText}>{notice}</Text> : null}
         <PrimaryButton onPress={submit}>{busy ? '요청 중...' : mode === 'signup' ? '이메일 회원가입' : '이메일 로그인'}</PrimaryButton>
-        <Pressable onPress={onKakao} style={styles.kakaoButton}>
-          <Text style={styles.kakaoText}>● 카카오로 시작하기</Text>
-        </Pressable>
         <View style={styles.dividerRow}>
           <View style={styles.divider} />
-          <Text style={styles.dividerText}>소셜 토큰으로 로그인</Text>
+          <Text style={styles.dividerText}>소셜 로그인</Text>
           <View style={styles.divider} />
         </View>
-        <AuthField autoCapitalize="none" label="Google OAuth token" onChangeText={setGoogleToken} value={googleToken} />
-        <SecondaryButton onPress={() => !busy && onOAuth('google', googleToken)}>Google 토큰 로그인</SecondaryButton>
+        <View style={styles.socialRow}>
+          <SecondaryButton onPress={() => startSocialLogin('google')}>Google</SecondaryButton>
+          <SecondaryButton onPress={() => startSocialLogin('kakao')}>Kakao</SecondaryButton>
+        </View>
+        {socialError ? <Text style={styles.errorText}>{socialError}</Text> : null}
         <Text style={styles.terms}>계속 진행하면 이용약관 및 개인정보처리방침에 동의한 것으로 간주됩니다.</Text>
       </View>
     </View>
   );
 }
 
-export function KakaoConsentScreen({ busy, error, onboardingOnly, onCancel, onContinue, onOnboarding }) {
+export function KakaoConsentScreen({ busy, error, onboardingOnly, onCancel, onContinue, onOnboarding, session }) {
   const [token, setToken] = useState('');
-  const [username, setUsername] = useState('yujin');
-  const [nickname, setNickname] = useState('유진');
+  const defaults = useMemo(() => getOnboardingDefaults(session), [session]);
+  const [username, setUsername] = useState(defaults.username);
+  const [nickname, setNickname] = useState(defaults.nickname);
+
+  useEffect(() => {
+    setUsername((current) => current || defaults.username);
+    setNickname((current) => current || defaults.nickname);
+  }, [defaults]);
 
   if (onboardingOnly) {
     return (
@@ -112,7 +274,7 @@ export function KakaoConsentScreen({ busy, error, onboardingOnly, onCancel, onCo
           <AuthField autoCapitalize="none" label="사용자명" onChangeText={setUsername} value={username} />
           <AuthField label="닉네임" onChangeText={setNickname} value={nickname} />
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
-          <PrimaryButton onPress={() => onOnboarding({ username, nickname })}>{busy ? '저장 중...' : '온보딩 완료'}</PrimaryButton>
+          <PrimaryButton onPress={() => onOnboarding({ username: cleanUsername(username), nickname: nickname.trim() })}>{busy ? '저장 중...' : '온보딩 완료'}</PrimaryButton>
         </View>
       </View>
     );
@@ -315,18 +477,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     lineHeight: 18,
-  },
-  kakaoButton: {
-    alignItems: 'center',
-    backgroundColor: '#fee500',
-    borderRadius: 9,
-    height: 48,
-    justifyContent: 'center',
-  },
-  kakaoText: {
-    color: '#111111',
-    fontSize: 14,
-    fontWeight: '900',
   },
   dividerRow: {
     alignItems: 'center',

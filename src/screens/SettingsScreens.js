@@ -1,22 +1,42 @@
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { MessageCircle, Search, Send } from 'lucide-react-native';
 import { Avatar, Card, Pill, PrimaryButton, Screen, ToggleRow } from '../components/ui';
 import { BLUE, INK, LINE, MUTED } from '../data/yetiData';
 
-export function ProfileEditScreen({ goBack }) {
+function getEmailName(email) {
+  return typeof email === 'string' && email.includes('@') ? email.split('@')[0] : '';
+}
+
+function getDisplayName(user) {
+  return user.nickname || user.nickName || user.displayName || user.display_name || user.name || getUsername(user) || '사용자';
+}
+
+function getUsername(user) {
+  return user.username || user.userName || user.preferred_username || user.handle || getEmailName(user.email) || user.userId || user.id || user.sub || 'user';
+}
+
+export function ProfileEditScreen({ goBack, session }) {
+  const user = session?.user || {};
+  const displayName = getDisplayName(user);
+  const username = getUsername(user);
+  const email = user.email || '-';
+  const avatarLabel = displayName.slice(0, 2).toUpperCase();
+
   return (
     <Screen left="‹" onBack={goBack} title="프로필 편집" right="저장">
       <View style={styles.center}>
-        <Avatar label="YJ" color={BLUE} size={76} />
+        <Avatar label={avatarLabel} color={BLUE} size={76} />
         <Text style={styles.camera}>▣</Text>
       </View>
       <Card style={styles.formCard}>
-        <Field label="닉네임" value="유진" />
-        <Field label="아이디 (@핸들)" value="@ yujin" caption="3-20자 · 영문/숫자/_" badge="사용 가능" />
+        <Field label="닉네임" value={displayName} />
+        <Field label="아이디 (@핸들)" value={`@ ${username}`} caption="3-20자 · 영문/숫자/_" badge="사용 가능" />
         <Field label="상태 메시지" value="약속을 한 번에 끝내고 싶다" caption="0/40" />
       </Card>
       <Text style={styles.section}>계정 정보</Text>
       <Card style={styles.formCard}>
-        <InfoRow label="이메일" value="yujin@kakao.com" />
+        <InfoRow label="이메일" value={email} />
         <InfoRow label="가입일" value="2026년 4월 23일" />
         <InfoRow label="로그인 방식" value="카카오" />
       </Card>
@@ -41,7 +61,7 @@ export function NotificationSettingsScreen({ goBack }) {
       </Card>
       <Text style={styles.section}>시스템</Text>
       <Card style={styles.formCard}>
-        <ToggleRow label="체험 만료 D-1 안내" enabled />
+        <ToggleRow label="서비스 공지 안내" enabled />
         <ToggleRow label="마케팅 정보 수신" />
       </Card>
     </Screen>
@@ -109,19 +129,25 @@ export function HelpFaqScreen({ goBack }) {
   return (
     <Screen left="‹" onBack={goBack} title="도움말">
       <View style={styles.searchBox}>
-        <Text style={styles.searchPlaceholder}>⌕ 궁금한 점을 검색해보세요</Text>
+        <Search color="#98a2b3" size={15} strokeWidth={2.4} />
+        <Text style={styles.searchPlaceholder}>궁금한 점을 검색해보세요</Text>
       </View>
       <Text style={styles.section}>자주 묻는 질문</Text>
       <Card style={styles.formCard}>
         <Faq title="자연어 입력이 잘 안 인식돼요." open>
           시간·장소·친구를 한 문장 안에 적으면 인식률이 높아져요. 모호한 표현은 신뢰도가 0.7 미만일 때 확인 화면이 따로 떠요.
         </Faq>
-        <Faq title="체험은 어떻게 시작되나요?" />
+        <Faq title="예티는 어떻게 시작하나요?" />
         <Faq title="친구 일정이 자동 등록되지 않아요." />
         <Faq title="학습 노트 AI 요약 사용법" />
-        <Faq title="구독을 해지하면 데이터가 사라지나요?" />
+        <Faq title="계정을 삭제하면 데이터가 사라지나요?" />
       </Card>
-      <PrimaryButton>⌕ 문의 보내기</PrimaryButton>
+      <PrimaryButton>
+        <View style={styles.buttonLabel}>
+          <Send color="#ffffff" size={15} strokeWidth={2.4} />
+          <Text style={styles.buttonLabelText}>문의 보내기</Text>
+        </View>
+      </PrimaryButton>
     </Screen>
   );
 }
@@ -153,26 +179,138 @@ export function TermsPrivacyScreen({ goBack }) {
   );
 }
 
-export function ScheduleEditScreen({ goBack }) {
+function toLocalInputValue(date) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function toIsoFromLocalInput(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toISOString();
+}
+
+function parseParticipants(value) {
+  return value
+    .split(',')
+    .map((item) => item.trim().replace(/^@/, ''))
+    .filter(Boolean);
+}
+
+export function ScheduleEditScreen({ apiBusy, apiError, goBack, onCreate, onSaved }) {
+  const now = new Date();
+  const defaultStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours() + 1, 0);
+  const defaultEnd = new Date(defaultStart.getTime() + 60 * 60 * 1000);
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [category, setCategory] = useState('약속');
+  const [startAt, setStartAt] = useState(toLocalInputValue(defaultStart));
+  const [endAt, setEndAt] = useState(toLocalInputValue(defaultEnd));
+  const [allDay, setAllDay] = useState(false);
+  const [location, setLocation] = useState('');
+  const [recurring, setRecurring] = useState(false);
+  const [recurrenceRule, setRecurrenceRule] = useState('');
+  const [visibility, setVisibility] = useState('PRIVATE');
+  const [participants, setParticipants] = useState('');
+  const [localError, setLocalError] = useState('');
+
+  const submit = async () => {
+    const startIso = toIsoFromLocalInput(startAt);
+    const endIso = toIsoFromLocalInput(endAt);
+
+    if (!title.trim()) {
+      setLocalError('일정 제목을 입력해주세요.');
+      return;
+    }
+    if (!startIso || !endIso) {
+      setLocalError('시작/종료 시간을 확인해주세요.');
+      return;
+    }
+    if (new Date(startIso).getTime() > new Date(endIso).getTime()) {
+      setLocalError('종료 시간은 시작 시간 이후여야 합니다.');
+      return;
+    }
+
+    setLocalError('');
+    try {
+      await onCreate?.({
+        title: title.trim(),
+        description: description.trim(),
+        category,
+        startAt: startIso,
+        endAt: endIso,
+        allDay,
+        location: location.trim(),
+        recurring,
+        recurrenceRule: recurring ? recurrenceRule.trim() : '',
+        visibility,
+        participantUsernames: parseParticipants(participants),
+      });
+      onSaved?.();
+    } catch (error) {
+      setLocalError(error.message || '일정 생성에 실패했습니다.');
+    }
+  };
+
   return (
-    <Screen left="‹" onBack={goBack} title="일정 수정" right="저장">
+    <Screen
+      left="‹"
+      onBack={goBack}
+      onRight={submit}
+      right={<Text style={styles.saveText}>{apiBusy ? '저장 중' : '저장'}</Text>}
+      title="일정 만들기"
+      bottom={<PrimaryButton onPress={submit}>{apiBusy ? '저장 중...' : '일정 저장'}</PrimaryButton>}
+    >
+      {localError || apiError ? <Text style={styles.errorText}>{localError || apiError}</Text> : null}
+      <Text style={styles.section}>기본 정보</Text>
       <Card style={styles.formCard}>
-        <InfoRow label="지민이와 회의" value="" />
+        <EditField label="제목" value={title} onChangeText={setTitle} placeholder="예: 지민이와 회의" />
+        <EditField label="메모" value={description} onChangeText={setDescription} multiline placeholder="일정 설명을 입력하세요" />
+        <Text style={styles.fieldLabel}>카테고리</Text>
         <View style={styles.chips}>
-          {['학습', '업무', '운동', '약속'].map((item) => <Pill key={item} tone={item === '업무' ? 'blue' : 'gray'}>{item}</Pill>)}
+          {['약속', '업무', '학습', '이동'].map((item) => (
+            <Pressable key={item} onPress={() => setCategory(item)}>
+              <Pill tone={category === item ? 'blue' : 'gray'}>{item}</Pill>
+            </Pressable>
+          ))}
         </View>
       </Card>
-      <Text style={styles.section}>언제</Text>
+
+      <Text style={styles.section}>시간</Text>
       <Card style={styles.formCard}>
-        <ToggleRow label="종일 일정" />
-        <InfoRow label="시작" value="5월 19일 (화) · 오후 2:00 ›" />
-        <InfoRow label="종료" value="5월 19일 (화) · 오후 3:00 ›" />
-        <InfoRow label="반복" value="없음 ›" />
-        <InfoRow label="알림" value="15분 전 ›" />
+        <ToggleRow label="종일 일정" enabled={allDay} onChange={setAllDay} />
+        <EditField label="시작" value={startAt} onChangeText={setStartAt} placeholder="2026-05-20T14:00" />
+        <EditField label="종료" value={endAt} onChangeText={setEndAt} placeholder="2026-05-20T15:00" />
+        <ToggleRow label="반복 일정" enabled={recurring} onChange={setRecurring} />
+        {recurring ? <EditField label="반복 규칙" value={recurrenceRule} onChangeText={setRecurrenceRule} placeholder="예: FREQ=WEEKLY;INTERVAL=1" /> : null}
       </Card>
-      <Text style={styles.section}>어디서</Text>
+
+      <Text style={styles.section}>장소와 공개 범위</Text>
       <Card style={styles.formCard}>
-        <InfoRow label="장소" value="강남" />
+        <EditField label="장소" value={location} onChangeText={setLocation} placeholder="예: 강남역" />
+        <Text style={styles.fieldLabel}>공개 범위</Text>
+        <View style={styles.chips}>
+          {[
+            ['PRIVATE', '나만 보기'],
+            ['FRIENDS', '친구 공개'],
+            ['PUBLIC', '전체 공개'],
+          ].map(([value, label]) => (
+            <Pressable key={value} onPress={() => setVisibility(value)}>
+              <Pill tone={visibility === value ? 'blue' : 'gray'}>{label}</Pill>
+            </Pressable>
+          ))}
+        </View>
+      </Card>
+
+      <Text style={styles.section}>참여자</Text>
+      <Card style={styles.formCard}>
+        <EditField
+          label="사용자명"
+          value={participants}
+          onChangeText={setParticipants}
+          placeholder="예: swon7150, yujin"
+          caption="여러 명이면 쉼표로 구분하세요."
+        />
       </Card>
     </Screen>
   );
@@ -193,7 +331,12 @@ export function FriendProfileScreen({ goBack }) {
         <MiniStat value="5" label="함께 한 채팅방" />
       </View>
       <View style={styles.actionRow}>
-        <PrimaryButton style={styles.actionButton}>⌕ 채팅</PrimaryButton>
+        <PrimaryButton style={styles.actionButton}>
+          <View style={styles.buttonLabel}>
+            <MessageCircle color="#ffffff" size={15} strokeWidth={2.4} />
+            <Text style={styles.buttonLabelText}>채팅</Text>
+          </View>
+        </PrimaryButton>
         <PrimaryButton style={styles.actionButton}>✦ 함께 일정</PrimaryButton>
       </View>
       <Text style={styles.section}>함께 예정된 일정</Text>
@@ -246,6 +389,24 @@ export function ChatSearchScreen({ goBack }) {
       <Text style={styles.section}>일정 3개</Text>
       <Card style={styles.formCard}><InfoRow label="북한산 등산" value="5월 23일(토) · 오전 9시 · 우이동" /></Card>
     </Screen>
+  );
+}
+
+function EditField({ label, value, onChangeText, placeholder, caption, multiline }) {
+  return (
+    <View style={styles.field}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <TextInput
+        multiline={multiline}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor="#b8c0cc"
+        style={[styles.fieldInput, multiline && styles.multilineInput]}
+        textAlignVertical={multiline ? 'top' : 'center'}
+        value={value}
+      />
+      {caption ? <Text style={styles.caption}>{caption}</Text> : null}
+    </View>
   );
 }
 
@@ -320,6 +481,9 @@ const styles = StyleSheet.create({
   fieldLabel: { color: MUTED, fontSize: 11, fontWeight: '900', marginBottom: 6 },
   fieldRow: { alignItems: 'center', flexDirection: 'row' },
   fieldInput: { color: INK, flex: 1, fontSize: 15, fontWeight: '900', padding: 0 },
+  multilineInput: { lineHeight: 21, minHeight: 72, paddingTop: 4 },
+  saveText: { color: BLUE, fontSize: 14, fontWeight: '900' },
+  errorText: { color: '#f04454', fontSize: 12, fontWeight: '800', marginBottom: 10 },
   badge: { backgroundColor: '#dcfce7', borderRadius: 16, color: '#16a34a', fontSize: 11, fontWeight: '900', overflow: 'hidden', paddingHorizontal: 8, paddingVertical: 5 },
   caption: { color: MUTED, fontSize: 11, fontWeight: '700', marginTop: 4 },
   infoRow: { alignItems: 'center', borderBottomColor: LINE, borderBottomWidth: 1, flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 15 },
@@ -338,8 +502,10 @@ const styles = StyleSheet.create({
   previewLine: { backgroundColor: '#111827', borderRadius: 2, height: 4, width: 24 },
   previewShortLine: { backgroundColor: '#d0d5dd', borderRadius: 2, height: 4, marginTop: 8, width: 42 },
   previewButton: { backgroundColor: BLUE, borderRadius: 3, height: 12, marginTop: 'auto' },
-  searchBox: { backgroundColor: '#f4f6f8', borderRadius: 10, marginBottom: 14, padding: 12 },
+  searchBox: { alignItems: 'center', backgroundColor: '#f4f6f8', borderRadius: 10, flexDirection: 'row', gap: 7, marginBottom: 14, padding: 12 },
   searchPlaceholder: { color: '#a0a8b5', fontSize: 13, fontWeight: '700' },
+  buttonLabel: { alignItems: 'center', flexDirection: 'row', gap: 6 },
+  buttonLabelText: { color: '#ffffff', fontSize: 15, fontWeight: '900' },
   faqItem: { borderBottomColor: LINE, borderBottomWidth: 1, paddingVertical: 13 },
   faqBody: { backgroundColor: '#f4f6f8', borderRadius: 8, color: MUTED, fontSize: 12, fontWeight: '700', lineHeight: 18, marginTop: 10, padding: 12 },
   safeBox: { alignItems: 'center', backgroundColor: '#f4f6f8', borderRadius: 12, flexDirection: 'row', gap: 12, marginBottom: 18, padding: 14 },

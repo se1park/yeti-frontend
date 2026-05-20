@@ -1,0 +1,12 @@
+env: load .env
+env: export EXPO_PUBLIC_API_BASE_URL EXPO_PUBLIC_GOOGLE_REDIRECT_URI EXPO_PUBLIC_KAKAO_REDIRECT_URI EXPO_PUBLIC_GOOGLE_CLIENT_ID EXPO_PUBLIC_KAKAO_REST_API_KEY EXPO_PUBLIC_KAKAO_CLIENT_SECRET
+Starting project at C:\Users\swon7\yeti-frontend
+Starting Metro Bundler
+warning: Bundler cache is empty, rebuilding (this may take a minute)
+Waiting on http://localhost:8081
+Logs for your project will appear below.
+Web .\index.js ▓▓▓▓▓▓▓▓▓▓▓░░░░░ 73.5% (42/67)
+Web .\index.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.3% ( 336/2021)
+Web .\index.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.3% (1636/2022)
+Web Bundled 10893ms index.js (2053 modules)
+ LOG  [web] Logs will appear in the browser console

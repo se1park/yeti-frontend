@@ -8,7 +8,7 @@ export function useHiddenWebScrollbars() {
 
     const style = document.createElement('style');
     style.textContent = `
-      html, body, #root { height: 100%; margin: 0; overflow: hidden; background: #ffffff; }
+      html, body, #root { height: 100%; margin: 0; overflow: hidden; background: #eef1f5; }
       body {
         -webkit-font-smoothing: antialiased;
         -webkit-tap-highlight-color: transparent;
@@ -39,18 +39,21 @@ export function AppFrame({ children }) {
 const styles = StyleSheet.create({
   safe: {
     alignItems: 'center',
-    backgroundColor: '#ffffff',
+    backgroundColor: '#eef1f5',
     flex: 1,
     justifyContent: 'center',
   },
   phone: {
-    backgroundColor: '#ffffff',
-    borderRadius: Platform.OS === 'web' ? 0 : 28,
-    borderWidth: 0,
+    backgroundColor: '#f6f7f9',
+    borderRadius: Platform.OS === 'web' ? 34 : 0,
     flex: 1,
     maxHeight: Platform.OS === 'web' ? 900 : undefined,
     maxWidth: Platform.OS === 'web' ? 430 : undefined,
     overflow: 'hidden',
+    shadowColor: '#111827',
+    shadowOffset: { height: 22, width: 0 },
+    shadowOpacity: Platform.OS === 'web' ? 0.12 : 0,
+    shadowRadius: 42,
     width: '100%',
   },
 });

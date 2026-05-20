@@ -4,27 +4,27 @@ import { BLUE, INK, LINE, MUTED, SOFT } from '../data/yetiData';
 
 const pressedStyle = ({ pressed }) => [
   pressed && {
-    opacity: 0.72,
+    opacity: 0.78,
   },
 ];
 
-export function Screen({ children, title, subtitle, left, right, onBack, onRight, bottom, noHeader = false }) {
+export function Screen({ children, title, subtitle, left, right, onBack, onRight, bottom, tabInset = false, noHeader = false }) {
   return (
     <View style={styles.screen}>
       {!noHeader ? (
         <View style={styles.topBar}>
           <HeaderSlot content={left} onPress={onBack} align="left" />
           <View style={styles.headerText}>
-            {title ? <Text style={styles.title}>{title}</Text> : null}
-            {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+            {title ? <Text numberOfLines={1} style={styles.title}>{title}</Text> : null}
+            {subtitle ? <Text numberOfLines={2} style={styles.subtitle}>{subtitle}</Text> : null}
           </View>
           <HeaderSlot content={right} onPress={onRight} align="right" />
         </View>
       ) : null}
       <ScrollView
         style={styles.scroller}
-        contentContainerStyle={[styles.scrollerContent, bottom && styles.withBottom]}
-        bounces
+        contentContainerStyle={[styles.scrollerContent, (bottom || tabInset) && styles.withBottom]}
+        bounces={false}
         keyboardShouldPersistTaps="handled"
         scrollEnabled
         showsHorizontalScrollIndicator={false}
@@ -40,17 +40,13 @@ export function Screen({ children, title, subtitle, left, right, onBack, onRight
 function HeaderSlot({ content, onPress, align }) {
   const slotStyle = [styles.topSlot, align === 'left' && styles.topSlotLeft];
 
-  if (!content) {
-    return <View style={slotStyle} />;
-  }
+  if (!content) return <View style={slotStyle} />;
 
   const inner = typeof content === 'string'
     ? <Text style={styles.topIcon}>{content}</Text>
     : content;
 
-  if (!onPress) {
-    return <View style={slotStyle}>{inner}</View>;
-  }
+  if (!onPress) return <View style={slotStyle}>{inner}</View>;
 
   return (
     <Pressable hitSlop={10} onPress={onPress} style={({ pressed }) => [...slotStyle, pressed && styles.pressed]}>
@@ -66,7 +62,7 @@ export function Card({ children, style }) {
 export function PrimaryButton({ children, onPress, style }) {
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.primaryButton, style, pressedStyle({ pressed })]}>
-      <Text style={styles.primaryButtonText}>{children}</Text>
+      {typeof children === 'string' ? <Text style={styles.primaryButtonText}>{children}</Text> : children}
     </Pressable>
   );
 }
@@ -74,7 +70,7 @@ export function PrimaryButton({ children, onPress, style }) {
 export function SecondaryButton({ children, onPress, style }) {
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.secondaryButton, style, pressedStyle({ pressed })]}>
-      <Text style={styles.secondaryButtonText}>{children}</Text>
+      {typeof children === 'string' ? <Text style={styles.secondaryButtonText}>{children}</Text> : children}
     </Pressable>
   );
 }
@@ -86,7 +82,7 @@ export function Pill({ children, tone = 'blue', style }) {
 export function Avatar({ label, color = BLUE, size = 32 }) {
   return (
     <View style={[styles.avatar, { backgroundColor: color, height: size, width: size, borderRadius: size / 2 }]}>
-      <Text style={styles.avatarText}>{label}</Text>
+      <Text style={[styles.avatarText, { fontSize: Math.max(12, size * 0.24) }]}>{label}</Text>
     </View>
   );
 }
@@ -127,102 +123,89 @@ export function ToggleRow({ label, enabled, onChange }) {
 
 const styles = StyleSheet.create({
   screen: {
-    backgroundColor: '#ffffff',
+    backgroundColor: '#f6f7f9',
     flex: 1,
   },
   topBar: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.98)',
+    backgroundColor: '#f6f7f9',
     flexDirection: 'row',
-    gap: 10,
-    minHeight: 58,
-    paddingHorizontal: 22,
+    minHeight: 56,
+    paddingHorizontal: 20,
     paddingTop: Platform.OS === 'web' ? 8 : 4,
-    shadowColor: '#111827',
-    shadowOffset: { height: 8, width: 0 },
-    shadowOpacity: 0.03,
-    shadowRadius: 12,
     zIndex: 2,
   },
   topIcon: {
     color: INK,
-    fontSize: 21,
-    fontWeight: '700',
+    fontSize: 20,
+    fontWeight: '800',
     minWidth: 22,
   },
   topSlot: {
     alignItems: 'flex-end',
     justifyContent: 'center',
-    minHeight: 40,
-    minWidth: 40,
+    minHeight: 42,
+    minWidth: 42,
   },
   topSlotLeft: {
     alignItems: 'flex-start',
   },
   headerText: {
+    alignItems: 'center',
     flex: 1,
   },
   title: {
     color: INK,
-    fontSize: 22,
+    fontSize: 17,
     fontWeight: '900',
     letterSpacing: 0,
-    lineHeight: 28,
+    lineHeight: 23,
+    textAlign: 'center',
   },
   subtitle: {
     color: MUTED,
-    fontSize: 13,
-    fontWeight: '600',
-    lineHeight: 20,
-    marginTop: 5,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 18,
+    marginTop: 3,
+    textAlign: 'center',
   },
   scroller: {
     flex: 1,
   },
   scrollerContent: {
-    paddingHorizontal: 22,
-    paddingBottom: 28,
-    paddingTop: 4,
+    flexGrow: 1,
+    paddingBottom: 118,
+    paddingHorizontal: 20,
+    paddingTop: 6,
   },
   withBottom: {
-    paddingBottom: 112,
+    paddingBottom: 148,
   },
   bottomAction: {
-    backgroundColor: 'rgba(255,255,255,0.94)',
+    backgroundColor: 'rgba(246,247,249,0.96)',
     bottom: 0,
     left: 0,
-    paddingBottom: 14,
-    paddingHorizontal: 22,
+    paddingBottom: 16,
+    paddingHorizontal: 20,
     paddingTop: 10,
     position: 'absolute',
     right: 0,
-    shadowColor: '#111827',
-    shadowOffset: { height: -8, width: 0 },
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
   },
   card: {
     backgroundColor: '#ffffff',
     borderColor: LINE,
-    borderRadius: 12,
+    borderRadius: 16,
     borderWidth: 1,
     marginBottom: 14,
-    padding: 15,
-    shadowColor: '#111827',
-    shadowOffset: { height: 6, width: 0 },
-    shadowOpacity: 0.05,
-    shadowRadius: 14,
+    padding: 16,
   },
   primaryButton: {
     alignItems: 'center',
     backgroundColor: BLUE,
-    borderRadius: 9,
-    height: 48,
+    borderRadius: 12,
+    height: 50,
     justifyContent: 'center',
-    shadowColor: BLUE,
-    shadowOffset: { height: 8, width: 0 },
-    shadowOpacity: 0.18,
-    shadowRadius: 14,
   },
   primaryButtonText: {
     color: '#ffffff',
@@ -232,9 +215,9 @@ const styles = StyleSheet.create({
   secondaryButton: {
     alignItems: 'center',
     backgroundColor: '#eef1f5',
-    borderRadius: 8,
+    borderRadius: 12,
     flex: 1,
-    height: 44,
+    height: 46,
     justifyContent: 'center',
   },
   secondaryButtonText: {
@@ -244,11 +227,11 @@ const styles = StyleSheet.create({
   },
   pill: {
     alignSelf: 'flex-start',
-    borderRadius: 8,
+    borderRadius: 999,
     fontSize: 11,
     fontWeight: '900',
     overflow: 'hidden',
-    paddingHorizontal: 8,
+    paddingHorizontal: 9,
     paddingVertical: 5,
   },
   pill_blue: {
@@ -261,7 +244,7 @@ const styles = StyleSheet.create({
   },
   pill_yellow: {
     backgroundColor: '#fef3c7',
-    color: '#f59e0b',
+    color: '#d97706',
   },
   pill_gray: {
     backgroundColor: SOFT,
@@ -273,7 +256,6 @@ const styles = StyleSheet.create({
   },
   avatarText: {
     color: '#ffffff',
-    fontSize: 13,
     fontWeight: '900',
   },
   row: {
@@ -284,12 +266,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 12,
-    marginTop: 4,
+    marginBottom: 10,
+    marginTop: 8,
   },
   sectionTitle: {
-    color: INK,
-    fontSize: 16,
+    color: '#667085',
+    fontSize: 12,
     fontWeight: '900',
   },
   sectionRight: {
@@ -303,34 +285,34 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 13,
+    paddingVertical: 15,
   },
   toggleLabel: {
     color: INK,
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: 15,
+    fontWeight: '800',
   },
   switchTrack: {
-    backgroundColor: '#d1d5db',
+    backgroundColor: '#cbd1da',
     borderRadius: 16,
-    height: 28,
+    height: 30,
     padding: 3,
-    width: 48,
+    width: 50,
   },
   switchTrackOn: {
     backgroundColor: BLUE,
   },
   switchThumb: {
     backgroundColor: '#ffffff',
-    borderRadius: 11,
-    height: 22,
-    width: 22,
+    borderRadius: 12,
+    height: 24,
+    width: 24,
   },
   switchThumbOn: {
     transform: [{ translateX: 20 }],
   },
   pressed: {
-    opacity: 0.62,
+    opacity: 0.7,
   },
 });
 

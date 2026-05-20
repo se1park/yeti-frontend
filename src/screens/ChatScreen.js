@@ -1,4 +1,5 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Plus, Search } from 'lucide-react-native';
 import { Avatar, Card, Pill, PrimaryButton, Screen, SecondaryButton } from '../components/ui';
 import { BLUE, INK, LINE, MUTED, chatRooms } from '../data/yetiData';
 
@@ -8,9 +9,13 @@ export function ChatListScreen({ goTo }) {
       <View style={styles.listHeader}>
         <Text style={styles.mainTitle}>채팅</Text>
         <View style={styles.headerActions}>
-          <Text style={styles.headerIcon}>＋</Text>
+          <View style={styles.headerIconButton}>
+            <Plus color={INK} size={20} strokeWidth={2.5} />
+          </View>
           <Pressable onPress={() => goTo('chatSearch')}>
-            <Text style={styles.headerIcon}>⌕</Text>
+            <View style={styles.headerIconButton}>
+              <Search color={INK} size={20} strokeWidth={2.5} />
+            </View>
           </Pressable>
         </View>
       </View>
@@ -22,11 +27,7 @@ export function ChatListScreen({ goTo }) {
       {chatRooms.map((room, index) => (
         <Pressable key={room.title} onPress={() => goTo('chatRoom')}>
           <View style={styles.roomRow}>
-            <View style={styles.avatarCluster}>
-              {room.avatars.map((avatar, avatarIndex) => (
-                <Avatar key={`${room.title}-${avatar}`} label={avatar} color={avatarIndex % 2 ? '#0fbf73' : BLUE} size={avatarIndex ? 24 : 34} />
-              ))}
-            </View>
+            <StackedAvatars avatars={room.avatars} title={room.title} />
             <View style={styles.roomText}>
               <View style={styles.roomTitleRow}>
                 <Text style={styles.roomTitle}>{room.title}</Text>
@@ -83,6 +84,20 @@ export function ChatRoomScreen({ goTo, goBack }) {
   );
 }
 
+function StackedAvatars({ avatars, title }) {
+  const colors = [BLUE, '#0fbf73', '#3268ee'];
+
+  return (
+    <View style={styles.avatarCluster}>
+      {avatars.slice(0, 3).map((avatar, index) => (
+        <View key={`${title}-${avatar}`} style={[styles.avatarBubble, styles[`avatarBubble${index}`]]}>
+          <Avatar label={avatar} color={colors[index % colors.length]} size={index === 0 ? 34 : 28} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
 function Bubble({ children, side }) {
   const right = side === 'right';
   return (
@@ -106,11 +121,17 @@ const styles = StyleSheet.create({
   },
   headerActions: {
     flexDirection: 'row',
-    gap: 18,
+    gap: 8,
   },
   headerIcon: {
     color: INK,
     fontSize: 22,
+  },
+  headerIconButton: {
+    alignItems: 'center',
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
   },
   segment: {
     flexDirection: 'row',
@@ -138,9 +159,31 @@ const styles = StyleSheet.create({
     minHeight: 62,
   },
   avatarCluster: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    width: 82,
+    height: 48,
+    position: 'relative',
+    width: 58,
+  },
+  avatarBubble: {
+    backgroundColor: '#ffffff',
+    borderColor: '#ffffff',
+    borderRadius: 999,
+    borderWidth: 2,
+    position: 'absolute',
+  },
+  avatarBubble0: {
+    left: 0,
+    top: 0,
+    zIndex: 3,
+  },
+  avatarBubble1: {
+    left: 25,
+    top: 5,
+    zIndex: 2,
+  },
+  avatarBubble2: {
+    left: 16,
+    top: 24,
+    zIndex: 1,
   },
   roomText: {
     flex: 1,

@@ -1,5 +1,6 @@
 const API_BASE_URL = (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_API_BASE_URL) || '';
 const SESSION_KEY = 'yeti.auth.session';
+const PROFILE_CACHE_KEY = 'yeti.auth.profileCache';
 
 let memorySession = null;
 
@@ -11,13 +12,169 @@ function getStorage() {
 }
 
 function readToken(payload, key) {
-  return payload?.[key] || payload?.data?.[key] || payload?.tokens?.[key] || payload?.data?.tokens?.[key] || null;
+  return (
+    payload?.[key]
+    || payload?.data?.[key]
+    || payload?.result?.[key]
+    || payload?.tokens?.[key]
+    || payload?.data?.tokens?.[key]
+    || payload?.result?.tokens?.[key]
+    || null
+  );
+}
+
+function decodeJwtPayload(token) {
+  if (!token || typeof token !== 'string') return null;
+
+  const [, body] = token.split('.');
+  if (!body) return null;
+
+  try {
+    const normalized = body.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+    const decoded = typeof atob === 'function'
+      ? atob(padded)
+      : Buffer.from(padded, 'base64').toString('utf8');
+    return JSON.parse(decoded);
+  } catch {
+    return null;
+  }
+}
+
+export function isAccessTokenExpiring(token, skewSeconds = 90) {
+  const payload = decodeJwtPayload(token);
+  if (!payload?.exp) return false;
+  return payload.exp * 1000 <= Date.now() + skewSeconds * 1000;
+}
+
+function hasUserIdentity(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return Boolean(
+    value.id
+    || value.userId
+    || value.email
+    || value.username
+    || value.userName
+    || value.nickname
+    || value.nickName
+    || value.name
+    || value.displayName
+    || value.display_name
+    || value.handle
+    || value.sub
+  );
+}
+
+function readFirstString(source, keys) {
+  if (!source || typeof source !== 'object') return '';
+
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+
+  for (const value of Object.values(source)) {
+    if (value && typeof value === 'object') {
+      const nested = readFirstString(value, keys);
+      if (nested) return nested;
+    }
+  }
+
+  return '';
+}
+
+function normalizeUser(value) {
+  if (!value || typeof value !== 'object') return {};
+
+  const nickname = readFirstString(value, ['nickname', 'nickName', 'displayName', 'display_name']);
+  const username = readFirstString(value, ['username', 'userName', 'preferred_username', 'handle']);
+  const email = readFirstString(value, ['email', 'emailAddress', 'mail']);
+  const name = readFirstString(value, ['name', 'realName', 'fullName']);
+  const id = readFirstString(value, ['id', 'userId', 'memberId', 'sub']);
+
+  return {
+    ...value,
+    ...(id ? { id } : {}),
+    ...(email ? { email } : {}),
+    ...(name ? { name } : {}),
+    ...(username ? { username } : {}),
+    ...(nickname ? { nickname } : {}),
+  };
+}
+
+function getUserCacheKey(user) {
+  const normalized = normalizeUser(user);
+  return normalized.id || normalized.userId || normalized.sub || normalized.email || '';
+}
+
+function readProfileCache() {
+  const storage = getStorage();
+  if (!storage) return {};
+
+  try {
+    return JSON.parse(storage.getItem(PROFILE_CACHE_KEY) || '{}');
+  } catch {
+    storage.removeItem(PROFILE_CACHE_KEY);
+    return {};
+  }
+}
+
+function getCachedProfile(user) {
+  const key = getUserCacheKey(user);
+  if (!key) return {};
+  return normalizeUser(readProfileCache()[key]);
+}
+
+function saveCachedProfile(user) {
+  const normalized = normalizeUser(user);
+  const key = getUserCacheKey(normalized);
+  if (!key || (!normalized.username && !normalized.nickname)) return;
+
+  const storage = getStorage();
+  if (!storage) return;
+
+  const cache = readProfileCache();
+  cache[key] = {
+    ...(cache[key] || {}),
+    ...normalized,
+  };
+  storage.setItem(PROFILE_CACHE_KEY, JSON.stringify(cache));
+}
+
+function readUser(payload, tokenClaims) {
+  const candidates = [
+    payload?.user,
+    payload?.data?.user,
+    payload?.result?.user,
+    payload?.profile,
+    payload?.data?.profile,
+    payload?.result?.profile,
+    payload?.member,
+    payload?.data?.member,
+    payload?.result?.member,
+    payload?.account,
+    payload?.data?.account,
+    payload?.result?.account,
+    payload,
+    payload?.data,
+    payload?.result,
+  ];
+  const responseUser = candidates.find(hasUserIdentity) || {};
+  const normalizedClaims = normalizeUser(tokenClaims);
+  const normalizedResponseUser = normalizeUser(responseUser);
+  const mergedUser = { ...normalizedClaims, ...normalizedResponseUser };
+  const cachedProfile = getCachedProfile(mergedUser);
+
+  return hasUserIdentity(normalizedResponseUser) || hasUserIdentity(normalizedClaims)
+    ? { ...mergedUser, ...cachedProfile }
+    : null;
 }
 
 function normalizeSession(payload) {
-  const accessToken = readToken(payload, 'accessToken') || readToken(payload, 'access_token');
+  const accessToken = readToken(payload, 'accessToken') || readToken(payload, 'access_token') || readToken(payload, 'token') || readToken(payload, 'jwt');
   const refreshToken = readToken(payload, 'refreshToken') || readToken(payload, 'refresh_token');
-  const user = payload?.user || payload?.data?.user || payload?.data || null;
+  const tokenClaims = decodeJwtPayload(accessToken);
+  const user = readUser(payload, tokenClaims);
 
   return {
     accessToken,
@@ -40,7 +197,12 @@ async function parseResponse(response) {
   }
 
   if (!response.ok) {
-    const message = payload?.message || payload?.error || `요청에 실패했습니다. (${response.status})`;
+    const fallbackMessage = response.status === 401
+      ? `로그인이 만료되었습니다. 다시 로그인해주세요. (${response.status})`
+      : response.status === 403
+        ? `요청 권한이 없거나 아직 사용할 수 없는 기능입니다. (${response.status})`
+      : `요청에 실패했습니다. (${response.status})`;
+    const message = payload?.message || payload?.error || fallbackMessage;
     if (typeof message === 'string' && message.length > 140) {
       throw new Error(`요청에 실패했습니다. (${response.status})`);
     }
@@ -50,7 +212,7 @@ async function parseResponse(response) {
   return payload;
 }
 
-async function request(path, { method = 'GET', body, token } = {}) {
+export async function request(path, { method = 'GET', body, token, query } = {}) {
   const headers = {
     Accept: 'application/json',
   };
@@ -63,9 +225,17 @@ async function request(path, { method = 'GET', body, token } = {}) {
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const search = query
+    ? `?${Object.entries(query)
+      .filter(([, value]) => value !== undefined && value !== null && value !== '')
+      .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+      .join('&')}`
+    : '';
+
+  const response = await fetch(`${API_BASE_URL}${path}${search}`, {
     method,
     headers,
+    mode: 'cors',
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 
@@ -77,10 +247,13 @@ export function getApiBaseUrl() {
 }
 
 export async function saveSession(session) {
-  memorySession = session;
+  const normalizedUser = normalizeUser(session?.user);
+  const nextSession = session ? { ...session, user: normalizedUser } : session;
+  saveCachedProfile(normalizedUser);
+  memorySession = nextSession;
   const storage = getStorage();
   if (storage) {
-    storage.setItem(SESSION_KEY, JSON.stringify(session));
+    storage.setItem(SESSION_KEY, JSON.stringify(nextSession));
   }
 }
 
@@ -93,6 +266,11 @@ export async function loadSession() {
 
   try {
     memorySession = JSON.parse(saved);
+    if (memorySession) {
+      const tokenClaims = decodeJwtPayload(memorySession.accessToken);
+      const normalizedUser = normalizeUser(memorySession.user);
+      memorySession.user = readUser(memorySession.raw, tokenClaims) || { ...normalizedUser, ...getCachedProfile(normalizedUser) };
+    }
     return memorySession;
   } catch {
     storage.removeItem(SESSION_KEY);
@@ -130,7 +308,10 @@ export async function completeOnboarding(body, accessToken) {
     body,
     token: accessToken,
   });
-  return payload;
+  return {
+    payload,
+    user: readUser(payload, null) || normalizeUser(body),
+  };
 }
 
 export async function refresh(refreshToken) {
