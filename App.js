@@ -9,6 +9,7 @@ import { AiInputScreen, AiReviewScreen } from './src/screens/AiScreen';
 import { ScheduleScreen } from './src/screens/ScheduleScreen';
 import { ChatListScreen, ChatRoomScreen } from './src/screens/ChatScreen';
 import { FriendsScreen } from './src/screens/FriendsScreen';
+import { FriendProfileScreen } from './src/screens/FriendProfileScreen';
 import { ProfileScreen } from './src/screens/ProfileScreen';
 import { StudyNoteScreen } from './src/screens/StudyNoteScreen';
 import { AdminScreen, NotificationsScreen } from './src/screens/UtilityScreens';
@@ -42,6 +43,7 @@ import {
   getFriends,
   getSchedules,
   getSchedule,
+  getScheduleInvitations,
   getStudyNotes,
   parseSchedule,
   proposeScheduleAdjust,
@@ -55,7 +57,6 @@ import {
 import {
   ChatSearchScreen,
   ChatSettingsScreen,
-  FriendProfileScreen,
   HelpFaqScreen,
   LanguageSettingsScreen,
   NotificationSettingsScreen,
@@ -82,6 +83,16 @@ function toArray(value) {
   if (Array.isArray(value?.data)) return value.data;
   if (Array.isArray(value?.result)) return value.result;
   if (Array.isArray(value?.content)) return value.content;
+  if (Array.isArray(value?.items)) return value.items;
+  if (Array.isArray(value?.list)) return value.list;
+  if (Array.isArray(value?.requests)) return value.requests;
+  if (Array.isArray(value?.friendRequests)) return value.friendRequests;
+  if (Array.isArray(value?.received)) return value.received;
+  if (Array.isArray(value?.incoming)) return value.incoming;
+  if (value && typeof value === 'object') {
+    const nestedArray = Object.values(value).find(Array.isArray);
+    if (nestedArray) return nestedArray;
+  }
   return [];
 }
 
@@ -93,17 +104,108 @@ function unwrapApiValue(value) {
   return value;
 }
 
-function normalizeScheduleValue(value) {
+function decodeBase64Url(value) {
+  const base64 = String(value || '').replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
+  if (typeof globalThis.atob === 'function') {
+    return globalThis.atob(padded);
+  }
+  return '';
+}
+
+function getJwtPayload(token) {
+  try {
+    const payload = String(token || '').split('.')[1];
+    if (!payload) return {};
+    return JSON.parse(decodeBase64Url(payload));
+  } catch {
+    return {};
+  }
+}
+
+function getSessionUserId(session) {
+  return session?.user?.id
+    || session?.user?.userId
+    || session?.id
+    || session?.userId
+    || getJwtPayload(session?.accessToken).sub
+    || '';
+}
+
+function unwrapScheduleValue(value) {
   const item = unwrapApiValue(value);
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+  const nested = item.schedule || item.scheduleDto || item.scheduleResponse || item.event;
+  if (!nested || typeof nested !== 'object' || Array.isArray(nested)) return item;
+  return {
+    ...item,
+    ...nested,
+    participantStatus: item.participantStatus || item.status,
+  };
+}
+
+function getRecurrenceRule(item) {
+  const recurrence = item?.recurrence;
+  if (typeof recurrence === 'string') return recurrence;
+  return item?.recurrenceRule
+    || item?.recurrence_rule
+    || item?.rrule
+    || item?.repeatRule
+    || item?.repeat_rule
+    || recurrence?.rule
+    || recurrence?.rrule
+    || '';
+}
+
+function getRecurringFlag(item, recurrenceRule) {
+  const recurrence = item?.recurrence;
+  return Boolean(
+    item?.recurring
+    || item?.isRecurring
+    || item?.repeat
+    || item?.repeating
+    || recurrenceRule
+    || recurrence?.frequency
+    || recurrence?.type
+  );
+}
+
+function normalizeScheduleParticipants(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((participant) => {
+    if (typeof participant === 'string') {
+      const username = participant.replace(/^@/, '').trim();
+      return username ? { username, status: 'PENDING' } : null;
+    }
+    if (!participant || typeof participant !== 'object') return null;
+    return {
+      ...participant,
+      userId: participant.userId || participant.id,
+      username: participant.username || participant.handle?.replace(/^@/, '') || '',
+      nickname: participant.nickname || participant.name || participant.username || '',
+      profileImageUrl: participant.profileImageUrl || participant.avatarUrl || '',
+      status: participant.status || 'PENDING',
+    };
+  }).filter(Boolean);
+}
+
+function normalizeScheduleValue(value) {
+  const item = unwrapScheduleValue(value);
   if (!item || typeof item !== 'object') return item;
   const startAt = item.startAt || item.start_at || item.start || item.startedAt || item.startsAt;
   const endAt = item.endAt || item.end_at || item.end || item.endedAt || item.endsAt;
+  const recurrenceRule = getRecurrenceRule(item);
+  const id = item.id || item.scheduleId;
   return {
     ...item,
-    id: item.id || item.scheduleId,
-    recurrenceRule: item.recurrenceRule || item.recurrence_rule || item.rrule || '',
-    recurring: Boolean(item.recurring || item.recurrenceRule || item.recurrence_rule || item.rrule),
-    scheduleId: item.scheduleId || item.id,
+    allDay: Boolean(item.allDay),
+    completed: Boolean(item.completed || item.status === 'COMPLETED'),
+    id,
+    owner: Boolean(item.owner),
+    participants: normalizeScheduleParticipants(item.participants),
+    recurrenceRule,
+    recurring: getRecurringFlag(item, recurrenceRule),
+    scheduleId: item.scheduleId || id,
     startAt,
     endAt,
     title: item.title || item.name || '제목 없는 일정',
@@ -114,11 +216,75 @@ function normalizeScheduleList(value) {
   return toArray(value).map(normalizeScheduleValue).filter(Boolean);
 }
 
+function normalizeScheduleInvitation(value) {
+  const item = unwrapApiValue(value);
+  if (!item || typeof item !== 'object') return item;
+  return {
+    ...item,
+    id: item.participantId || item.id || `${item.scheduleId}-${item.ownerId}`,
+    participantId: item.participantId || item.userId || item.id,
+    scheduleId: item.scheduleId || item.id,
+    title: item.scheduleTitle || item.title || '초대받은 일정',
+    ownerName: item.ownerNickname || item.ownerUsername || '친구',
+    status: item.status || 'PENDING',
+  };
+}
+
+function normalizeScheduleInvitations(value) {
+  return toArray(value).map(normalizeScheduleInvitation).filter(Boolean);
+}
+
+function getInvitationStatus(value) {
+  return String(value || '').toUpperCase();
+}
+
+function isPendingInvitation(value) {
+  return ['PENDING', 'INVITED', 'REQUESTED'].includes(getInvitationStatus(value));
+}
+
+function isAcceptedInvitation(value) {
+  return getInvitationStatus(value) === 'ACCEPTED';
+}
+
+function getVisibleSchedulesByInvitations(scheduleList, invitationList) {
+  const invitationByScheduleId = new Map((invitationList || [])
+    .filter((invitation) => invitation?.scheduleId)
+    .map((invitation) => [invitation.scheduleId, invitation]));
+
+  return (scheduleList || []).filter((schedule) => {
+    if (schedule?.owner) return true;
+
+    const invitation = invitationByScheduleId.get(schedule?.scheduleId || schedule?.id);
+    if (!invitation) return true;
+
+    return isAcceptedInvitation(invitation.status);
+  });
+}
+
 function getMentionedUsernames(value) {
   return Array.from(new Set(String(value || '')
     .match(/@[A-Za-z0-9_.-]+/g)
     ?.map((item) => item.slice(1))
     .filter(Boolean) || []));
+}
+
+function normalizeParticipantUsername(value) {
+  const raw = typeof value === 'string'
+    ? value
+    : value?.username || value?.handle || value?.userName || value?.nickname || '';
+  const username = String(raw).trim().replace(/^@/, '');
+  if (!username || username === '나' || username.toLowerCase() === 'me') return '';
+  return username;
+}
+
+function getParsedParticipantUsernames(schedule, input) {
+  const parsedParticipants = Array.isArray(schedule?.participants)
+    ? schedule.participants.map(normalizeParticipantUsername)
+    : [];
+  return Array.from(new Set([
+    ...parsedParticipants,
+    ...getMentionedUsernames(input),
+  ].filter(Boolean)));
 }
 
 function detectWeeklyWeekday(input) {
@@ -160,6 +326,10 @@ function refineParsedScheduleFromInput(schedule, input) {
   return moveScheduleToWeekday(schedule, weeklyDay);
 }
 
+function getFriendUsername(friend) {
+  return friend?.username || friend?.handle?.replace(/^@/, '') || friend?.raw?.username || '';
+}
+
 Text.defaultProps = Text.defaultProps || {};
 Text.defaultProps.style = [{ fontFamily: 'Pretendard' }, Text.defaultProps.style];
 TextInput.defaultProps = TextInput.defaultProps || {};
@@ -184,14 +354,24 @@ export default function App() {
   const [schedules, setSchedules] = useState([]);
   const [friends, setFriends] = useState([]);
   const [friendRequests, setFriendRequests] = useState([]);
+  const [scheduleInvitations, setScheduleInvitations] = useState([]);
   const [parsedSchedule, setParsedSchedule] = useState(null);
   const [parsedScheduleInput, setParsedScheduleInput] = useState('');
+  const [selectedFriend, setSelectedFriend] = useState(null);
   const [selectedSchedule, setSelectedSchedule] = useState(null);
   const [studyNotes, setStudyNotes] = useState([]);
   const [chatRooms, setChatRooms] = useState([]);
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
   const [apiBusy, setApiBusy] = useState(false);
+  const visibleSchedules = useMemo(
+    () => getVisibleSchedulesByInvitations(schedules, scheduleInvitations),
+    [schedules, scheduleInvitations],
+  );
+  const pendingInvitationCount = useMemo(
+    () => scheduleInvitations.filter((invitation) => isPendingInvitation(invitation.status)).length,
+    [scheduleInvitations],
+  );
 
   useEffect(() => {
     loadSession().then((savedSession) => {
@@ -270,18 +450,38 @@ export default function App() {
     }
   }, [getProtectedToken, session]);
 
+  const refreshFriendData = useCallback(async () => {
+    if (!session?.accessToken || session.newUser) return;
+
+    const [friendResult, requestResult] = await Promise.allSettled([
+      runWithProtectedToken((token) => getFriends(token)),
+      runWithProtectedToken((token) => getFriendRequests(token)),
+    ]);
+
+    if (friendResult.status === 'fulfilled') {
+      setFriends(toArray(friendResult.value));
+    }
+
+    if (requestResult.status === 'fulfilled') {
+      setFriendRequests(toArray(requestResult.value));
+    } else {
+      setApiError(requestResult.reason?.message || '받은 친구 요청을 불러오지 못했습니다.');
+    }
+  }, [runWithProtectedToken, session?.accessToken, session?.newUser]);
+
   useEffect(() => {
     if (!session?.accessToken || session.newUser) return;
 
     let cancelled = false;
     setApiError('');
 
-    getProtectedToken().then((token) => Promise.allSettled([
-      getSchedules(token),
-      getFriends(token),
-      getFriendRequests(token),
-      getChatRooms(token),
-    ])).then(([scheduleResult, friendResult, requestResult, roomResult]) => {
+    Promise.allSettled([
+      runWithProtectedToken((token) => getSchedules(token)),
+      runWithProtectedToken((token) => getFriends(token)),
+      runWithProtectedToken((token) => getFriendRequests(token)),
+      runWithProtectedToken((token) => getScheduleInvitations(token)),
+      runWithProtectedToken((token) => getChatRooms(token)),
+    ]).then(([scheduleResult, friendResult, requestResult, invitationResult, roomResult]) => {
       if (cancelled) return;
 
       if (scheduleResult.status === 'fulfilled') {
@@ -292,6 +492,9 @@ export default function App() {
       }
       if (requestResult.status === 'fulfilled') {
         setFriendRequests(toArray(requestResult.value));
+      }
+      if (invitationResult.status === 'fulfilled') {
+        setScheduleInvitations(normalizeScheduleInvitations(invitationResult.value));
       }
       if (roomResult.status === 'fulfilled') {
         setChatRooms(toArray(roomResult.value));
@@ -309,7 +512,13 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [getProtectedToken, session?.accessToken, session?.newUser]);
+  }, [runWithProtectedToken, session?.accessToken, session?.newUser]);
+
+  useEffect(() => {
+    if (screen === 'friends') {
+      refreshFriendData();
+    }
+  }, [refreshFriendData, screen]);
 
   const goTo = (nextScreen) => {
     if (nextScreen === screen) return;
@@ -486,7 +695,7 @@ export default function App() {
 
   const handleCreateParsedSchedule = async () => {
     if (!session?.accessToken || !parsedSchedule) return;
-    const participantUsernames = getMentionedUsernames(parsedScheduleInput);
+    const participantUsernames = getParsedParticipantUsernames(parsedSchedule, parsedScheduleInput);
 
     const body = {
       title: parsedSchedule.title,
@@ -616,9 +825,50 @@ export default function App() {
 
   const handleParticipantStatus = async (scheduleId, userId, body) => {
     const token = await getProtectedToken();
-    const updated = await respondToInvitation(scheduleId, userId, body, token);
+    const action = body?.action || (body?.status === 'REJECTED' ? 'REJECT' : 'ACCEPT');
+    const updated = normalizeScheduleValue(await respondToInvitation(scheduleId, action, token));
     setSelectedSchedule(updated);
     return updated;
+  };
+
+  const refreshSchedulesAndInvitations = async () => {
+    const [scheduleResult, invitationResult] = await Promise.allSettled([
+      runWithProtectedToken((token) => getSchedules(token)),
+      runWithProtectedToken((token) => getScheduleInvitations(token)),
+    ]);
+
+    if (scheduleResult.status === 'fulfilled') {
+      setSchedules(normalizeScheduleList(scheduleResult.value));
+    }
+    if (invitationResult.status === 'fulfilled') {
+      setScheduleInvitations(normalizeScheduleInvitations(invitationResult.value));
+    }
+  };
+
+  const handleScheduleInvitationAction = async (invitation, status) => {
+    const scheduleId = invitation?.scheduleId;
+    const participantId = invitation?.participantId || invitation?.userId || invitation?.id;
+    const action = status === 'REJECTED' || status === 'REJECT' ? 'REJECT' : 'ACCEPT';
+    const nextStatus = action === 'REJECT' ? 'REJECTED' : 'ACCEPTED';
+
+    if (!scheduleId) {
+      throw new Error('초대 응답에 필요한 식별자를 찾을 수 없습니다.');
+    }
+
+    setApiBusy(true);
+    setApiError('');
+    try {
+      await runWithProtectedToken((token) => respondToInvitation(scheduleId, action, token));
+      setScheduleInvitations((previous) => previous.map((item) => (
+        (item.participantId || item.id) === participantId ? { ...item, status: nextStatus } : item
+      )));
+      await refreshSchedulesAndInvitations();
+    } catch (error) {
+      setApiError(error.message || '일정 초대 응답에 실패했습니다.');
+      throw error;
+    } finally {
+      setApiBusy(false);
+    }
   };
 
   const handleProposeAdjust = async (scheduleId, userId, body) => {
@@ -627,21 +877,21 @@ export default function App() {
   };
 
   const handleFriendRequestAction = async (friendshipId, action) => {
-    if (!session?.accessToken || !friendshipId) return;
+    if (!session?.accessToken) return;
+    if (!friendshipId) {
+      setApiError('친구 요청 ID를 찾을 수 없습니다.');
+      return;
+    }
 
     setApiError('');
     try {
-      const token = await getProtectedToken();
       if (action === 'accept') {
-        await acceptFriendRequest(friendshipId, token);
+        await runWithProtectedToken((token) => acceptFriendRequest(friendshipId, token));
       } else {
-        await rejectFriendRequest(friendshipId, token);
+        await runWithProtectedToken((token) => rejectFriendRequest(friendshipId, token));
       }
       setFriendRequests((previous) => previous.filter((item) => item.friendshipId !== friendshipId));
-      if (action === 'accept') {
-        const nextFriends = await getFriends(token);
-        setFriends(toArray(nextFriends));
-      }
+      await refreshFriendData();
     } catch (error) {
       setApiError(error.message || '친구 요청 처리에 실패했습니다.');
     }
@@ -652,8 +902,14 @@ export default function App() {
       throw new Error('로그인이 필요합니다.');
     }
 
-    const token = await getProtectedToken();
-    const sent = await sendFriendRequest(username, token);
+    const targetUsername = String(username || '').trim().replace(/^@/, '');
+    if (!targetUsername) {
+      throw new Error('username을 입력해주세요.');
+    }
+
+    setApiError('');
+    const sent = await runWithProtectedToken((token) => sendFriendRequest(targetUsername, token));
+    await refreshFriendData();
     return sent;
   };
 
@@ -667,6 +923,11 @@ export default function App() {
     const token = await getProtectedToken();
     await blockUser(friendshipId, token);
     setFriends((previous) => previous.filter((item) => item.friendshipId !== friendshipId));
+  };
+
+  const handleOpenFriendProfile = (friend) => {
+    setSelectedFriend(friend || null);
+    goTo('friendProfile');
   };
 
   const handleOpenStudyNote = async (schedule = selectedSchedule || schedules[0]) => {
@@ -713,10 +974,25 @@ export default function App() {
   };
 
   const handleCreateChatRoom = async (body) => {
-    const token = await getProtectedToken();
-    const created = await createChatRoom(body, token);
+    const created = unwrapApiValue(await runWithProtectedToken((token) => createChatRoom(body, token)));
     setChatRooms((previous) => [created, ...previous]);
     return created;
+  };
+
+  const handleStartDirectChat = async (friend = selectedFriend) => {
+    const username = getFriendUsername(friend);
+    if (!username) {
+      setApiError('채팅방을 만들 친구 username을 찾을 수 없습니다.');
+      return;
+    }
+
+    setApiError('');
+    const room = await handleCreateChatRoom({
+      type: 'DIRECT',
+      name: friend?.nickname || friend?.name || username,
+      memberUsernames: [username],
+    });
+    await handleOpenChatRoom(room);
   };
 
   const handleReactMessage = async (messageId, emoji) => {
@@ -755,7 +1031,7 @@ export default function App() {
     if (screen === 'kakaoConsent') return <KakaoConsentScreen busy={authBusy} error={authError} onCancel={goBack} onContinue={(token) => handleOAuth('kakao', token)} />;
     if (screen === 'onboardingSetup') return <KakaoConsentScreen busy={authBusy} error={authError} onboardingOnly onCancel={handleLogout} onOnboarding={handleOnboarding} session={session} />;
 
-    if (screen === 'home') return <HomeScreen apiError={apiError} goTo={goTo} onNewSchedule={handleNewSchedule} onOpenSchedule={handleOpenSchedule} schedules={schedules} />;
+    if (screen === 'home') return <HomeScreen apiError={apiError} goTo={goTo} notificationCount={pendingInvitationCount} onNewSchedule={handleNewSchedule} onOpenSchedule={handleOpenSchedule} schedules={visibleSchedules} />;
     if (screen === 'ai') return <AiInputScreen apiBusy={apiBusy} apiError={apiError} friends={friends} goTo={goTo} goBack={goBack} onParse={handleParseSchedule} />;
     if (screen === 'aiReview') return <AiReviewScreen apiBusy={apiBusy} apiError={apiError} goTo={goTo} goBack={goBack} onCreate={handleCreateParsedSchedule} parsedSchedule={parsedSchedule} />;
     if (screen === 'schedule') {
@@ -769,15 +1045,15 @@ export default function App() {
           onOpenStudyNote={handleOpenStudyNote}
           onParticipantStatus={handleParticipantStatus}
           onProposeAdjust={handleProposeAdjust}
-          schedule={selectedSchedule || schedules[0]}
+          schedule={selectedSchedule || visibleSchedules[0]}
         />
       );
     }
     if (screen === 'chat') return <ChatListScreen apiError={apiError} goTo={goTo} onCreateRoom={handleCreateChatRoom} onOpenRoom={handleOpenChatRoom} rooms={chatRooms} />;
     if (screen === 'chatRoom') return <ChatRoomScreen goTo={goTo} goBack={goBack} messages={chatMessages} onCreateMediaUpload={handleCreateMediaUpload} onDeleteMessage={handleDeleteMessage} onReactMessage={handleReactMessage} room={selectedRoom} />;
-    if (screen === 'friends') return <FriendsScreen apiError={apiError} friendRequests={friendRequests} friends={friends} goTo={goTo} onBlockFriend={handleBlockFriend} onDeleteFriend={handleDeleteFriend} onRequestAction={handleFriendRequestAction} onSendRequest={handleSendFriendRequest} />;
-    if (screen === 'studyNote') return <StudyNoteScreen apiError={apiError} goBack={goBack} notes={studyNotes} onCreateNote={handleCreateStudyNote} onSummarizeNote={handleSummarizeStudyNote} schedule={selectedSchedule || schedules[0]} />;
-    if (screen === 'notices') return <NotificationsScreen goBack={goBack} />;
+    if (screen === 'friends') return <FriendsScreen apiError={apiError} friendRequests={friendRequests} friends={friends} goTo={goTo} onBlockFriend={handleBlockFriend} onDeleteFriend={handleDeleteFriend} onOpenFriend={handleOpenFriendProfile} onRequestAction={handleFriendRequestAction} onSendRequest={handleSendFriendRequest} />;
+    if (screen === 'studyNote') return <StudyNoteScreen apiError={apiError} goBack={goBack} notes={studyNotes} onCreateNote={handleCreateStudyNote} onSummarizeNote={handleSummarizeStudyNote} schedule={selectedSchedule || visibleSchedules[0]} />;
+    if (screen === 'notices') return <NotificationsScreen apiBusy={apiBusy} apiError={apiError} goBack={goBack} invitations={scheduleInvitations} onInvitationAction={handleScheduleInvitationAction} />;
     if (screen === 'admin') return <AdminScreen goBack={goBack} />;
     if (screen === 'profileEdit') return <ProfileEditScreen goBack={goBack} session={session} />;
     if (screen === 'notificationSettings') return <NotificationSettingsScreen goBack={goBack} />;
@@ -798,11 +1074,11 @@ export default function App() {
         />
       );
     }
-    if (screen === 'friendProfile') return <FriendProfileScreen goBack={goBack} />;
+    if (screen === 'friendProfile') return <FriendProfileScreen apiError={apiError} friend={selectedFriend} goBack={goBack} onChat={handleStartDirectChat} />;
     if (screen === 'chatSettings') return <ChatSettingsScreen goBack={goBack} />;
     if (screen === 'chatSearch') return <ChatSearchScreen goBack={goBack} />;
     return <ProfileScreen authError={authError} goTo={goTo} onLogout={handleLogout} onRefreshPlan={refreshPlan} plan={plan} session={session} />;
-  }, [screen, history, session, plan, authError, authNotice, authBusy, apiError, schedules, friends, friendRequests, parsedSchedule, parsedScheduleInput, selectedSchedule, studyNotes, chatRooms, selectedRoom, chatMessages, apiBusy, fontsLoaded, runWithProtectedToken]);
+  }, [screen, history, session, plan, authError, authNotice, authBusy, apiError, schedules, visibleSchedules, friends, friendRequests, scheduleInvitations, pendingInvitationCount, parsedSchedule, parsedScheduleInput, selectedFriend, selectedSchedule, studyNotes, chatRooms, selectedRoom, chatMessages, apiBusy, fontsLoaded, runWithProtectedToken]);
 
   return (
     <AppFrame>

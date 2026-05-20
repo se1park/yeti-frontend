@@ -15,6 +15,13 @@ export function getSchedule(scheduleId, token) {
   });
 }
 
+export function getScheduleInvitations(token) {
+  return request('/api/schedules/invitations', {
+    method: 'GET',
+    token,
+  });
+}
+
 export function createSchedule(body, token) {
   return request('/api/schedules', {
     method: 'POST',
@@ -45,10 +52,10 @@ export function completeSchedule(scheduleId, token) {
   });
 }
 
-export function respondToInvitation(scheduleId, userId, status, token) {
-  return request(`/api/schedules/${scheduleId}/participants/${userId}`, {
+export function respondToInvitation(scheduleId, action, token) {
+  return request(`/api/schedules/${scheduleId}/respond`, {
     method: 'PATCH',
-    body: typeof status === 'object' ? status : { status },
+    body: { action },
     token,
   });
 }

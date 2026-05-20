@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { MessageCircle, Search, Send } from 'lucide-react-native';
 import { Avatar, Card, Pill, PrimaryButton, Screen, ToggleRow } from '../components/ui';
 import { BLUE, INK, LINE, MUTED } from '../data/yetiData';
@@ -211,7 +211,10 @@ export function ScheduleEditScreen({ apiBusy, apiError, goBack, onCreate, onSave
   const [recurring, setRecurring] = useState(Boolean(schedule?.recurring));
   const [recurrenceRule, setRecurrenceRule] = useState(schedule?.recurrenceRule || '');
   const [visibility, setVisibility] = useState(schedule?.visibility || 'PRIVATE');
-  const [participants, setParticipants] = useState('');
+  const [participants, setParticipants] = useState((schedule?.participants || [])
+    .map((person) => person?.username || person?.handle?.replace(/^@/, '') || '')
+    .filter(Boolean)
+    .join(', '));
   const [localError, setLocalError] = useState('');
 
   const submit = async () => {
@@ -233,7 +236,7 @@ export function ScheduleEditScreen({ apiBusy, apiError, goBack, onCreate, onSave
 
     setLocalError('');
     try {
-      await onCreate?.({
+      const body = {
         title: title.trim(),
         description: description.trim(),
         category,
@@ -244,8 +247,13 @@ export function ScheduleEditScreen({ apiBusy, apiError, goBack, onCreate, onSave
         recurring,
         recurrenceRule: recurring ? recurrenceRule.trim() : '',
         visibility,
-        participantUsernames: parseParticipants(participants),
-      });
+      };
+
+      if (!schedule) {
+        body.participantUsernames = parseParticipants(participants);
+      }
+
+      await onCreate?.(body);
       onSaved?.();
     } catch (error) {
       setLocalError(error.message || '일정 생성에 실패했습니다.');
@@ -316,7 +324,13 @@ export function ScheduleEditScreen({ apiBusy, apiError, goBack, onCreate, onSave
   );
 }
 
-export function FriendProfileScreen({ goBack }) {
+export function FriendProfileScreen({ apiError, friend, goBack, onChat }) {
+  const username = friend?.username || friend?.handle?.replace(/^@/, '') || 'user';
+  const displayName = friend?.nickname || friend?.name || username;
+  const statusMessage = friend?.statusMessage || friend?.message || '상태 메시지가 없습니다.';
+  const avatarLabel = displayName.slice(0, 1).toUpperCase();
+  const profileImageUrl = friend?.profileImageUrl || friend?.profile_image_url || '';
+
   return (
     <Screen left="‹" onBack={goBack} right="···">
       <View style={styles.profileCenter}>

@@ -28,6 +28,11 @@ function normalizeParticipant(person, index) {
   };
 }
 
+function isStudyCategory(category) {
+  const normalized = String(category || '').trim().toLowerCase();
+  return normalized === '학습' || normalized === 'study' || normalized === 'learning';
+}
+
 export function ScheduleScreen({ apiError, goTo, goBack, onComplete, onDelete, onOpenStudyNote, onParticipantStatus, onProposeAdjust, schedule }) {
   const [completeVisible, setCompleteVisible] = useState(false);
   const [localError, setLocalError] = useState('');
@@ -35,6 +40,7 @@ export function ScheduleScreen({ apiError, goTo, goBack, onComplete, onDelete, o
   const participantList = (detail?.participants || []).map(normalizeParticipant);
   const scheduleId = detail?.scheduleId || detail?.id;
   const isCompleted = Boolean(detail?.completed || detail?.status === 'COMPLETED');
+  const canOpenStudyNote = isStudyCategory(detail?.category);
 
   const finish = async () => {
     if (!scheduleId || isCompleted) return;
@@ -81,7 +87,9 @@ export function ScheduleScreen({ apiError, goTo, goBack, onComplete, onDelete, o
             <Text style={styles.info}>{detail.description || '메모가 없습니다.'}</Text>
             <Text style={styles.privacy}>⊙ {detail.visibility || 'PRIVATE'}</Text>
             <View style={styles.quickActions}>
-              <SecondaryButton onPress={() => onOpenStudyNote?.(detail)} style={styles.quickButton}>학습 노트</SecondaryButton>
+              {canOpenStudyNote ? (
+                <SecondaryButton onPress={() => onOpenStudyNote?.(detail)} style={styles.quickButton}>학습 노트</SecondaryButton>
+              ) : null}
               <SecondaryButton onPress={remove} style={styles.quickButton}>삭제</SecondaryButton>
             </View>
             <Card style={styles.peopleCard}>

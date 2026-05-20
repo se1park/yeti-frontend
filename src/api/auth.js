@@ -188,12 +188,20 @@ function normalizeSession(payload) {
 
 async function parseResponse(response) {
   const text = await response.text();
+  const ngrokErrorCode = response.headers?.get?.('ngrok-error-code');
   let payload = {};
 
   try {
     payload = text ? JSON.parse(text) : {};
   } catch {
     payload = { message: text || `응답을 해석할 수 없습니다. (${response.status})` };
+  }
+
+  if (ngrokErrorCode || String(text).includes('ERR_NGROK_')) {
+    const error = new Error(`백엔드 ngrok 터널이 연결되지 않았습니다. ngrok/backend를 다시 켜주세요. (${ngrokErrorCode || 'NGROK_ERROR'})`);
+    error.status = 502;
+    error.payload = payload;
+    throw error;
   }
 
   if (!response.ok) {
@@ -220,6 +228,10 @@ export async function request(path, { method = 'GET', body, token, query } = {})
     Accept: 'application/json',
   };
 
+  if (API_BASE_URL.includes('ngrok')) {
+    headers['ngrok-skip-browser-warning'] = 'true';
+  }
+
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
   }
@@ -235,12 +247,24 @@ export async function request(path, { method = 'GET', body, token, query } = {})
       .join('&')}`
     : '';
 
-  const response = await fetch(`${API_BASE_URL}${path}${search}`, {
-    method,
-    headers,
-    mode: 'cors',
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  let response;
+
+  try {
+    response = await fetch(`${API_BASE_URL}${path}${search}`, {
+      method,
+      headers,
+      mode: 'cors',
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch (error) {
+    const message = API_BASE_URL.includes('ngrok')
+      ? '백엔드 ngrok 터널에 연결할 수 없습니다. ngrok/backend를 다시 켜고 새 주소면 .env를 갱신해주세요.'
+      : (error.message || 'API 서버에 연결할 수 없습니다.');
+    const nextError = new Error(message);
+    nextError.status = 0;
+    nextError.cause = error;
+    throw nextError;
+  }
 
   return parseResponse(response);
 }

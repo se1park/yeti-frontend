@@ -5,9 +5,13 @@ Starting Metro Bundler
 warning: Bundler cache is empty, rebuilding (this may take a minute)
 Waiting on http://localhost:8081
 Logs for your project will appear below.
-Web .\index.js ▓▓▓▓▓▓▓▓▓▓▓░░░░░ 69.4% (35/42)
-Web .\index.js ▓▓▓▓▓▓▓▓▓▓▓▓▓░░░ 84.2% (278/303)
-Web .\index.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.3% (1010/2022)
-Web .\index.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.8% (2051/2053)
-Web Bundled 13175ms index.js (2053 modules)
+Web .\index.js ▓▓▓▓▓▓▓░░░░░░░░░ 47.9% (27/39)
+Web .\index.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░ 91.9% (142/179)
+Web .\index.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.4% (309/311)
+Web .\index.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.4% ( 941/2025)
+Web .\index.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.4% (1808/2025)
+Web Bundled 18007ms index.js (2056 modules)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 65ms index.js (1 module)
  LOG  [web] Logs will appear in the browser console

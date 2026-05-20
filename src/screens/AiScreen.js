@@ -34,6 +34,18 @@ function formatScheduleDateLine(result) {
   return `${formatDateTime(result.startAt)} - ${formatDateTime(result.endAt)}`;
 }
 
+function getParticipantLabel(participant) {
+  if (typeof participant === 'string') return participant.replace(/^@/, '');
+  return participant?.nickname || participant?.username || participant?.handle?.replace(/^@/, '') || '';
+}
+
+function formatParticipantText(participants) {
+  const names = Array.isArray(participants)
+    ? participants.map(getParticipantLabel).filter(Boolean)
+    : [];
+  return names.length ? `, ${names.join(', ')}` : '';
+}
+
 function getMentionState(value, cursor) {
   const beforeCursor = value.slice(0, cursor);
   const match = beforeCursor.match(/(^|\s)@([A-Za-z0-9_.-]*)$/);
@@ -161,6 +173,7 @@ export function AiReviewScreen({ apiBusy, apiError, goTo, goBack, onCreate, pars
   const confidence = result
     ? Math.round((result.aiConfidence > 1 ? result.aiConfidence : result.aiConfidence * 100) || 96)
     : 0;
+  const participantText = formatParticipantText(result?.participants);
 
   const submit = async () => {
     setLocalError('');
@@ -191,6 +204,9 @@ export function AiReviewScreen({ apiBusy, apiError, goTo, goBack, onCreate, pars
               <Text style={styles.typedText}><Text style={styles.blue}>{result.title}</Text> 일정이 정리됐어요.</Text>
             </View>
             {localError || apiError ? <Text style={styles.errorText}>{localError || apiError}</Text> : null}
+            {result.clarificationRequired ? (
+              <Text style={styles.warningText}>AI가 일부 내용을 확신하지 못했어요. 등록 전에 일정 정보를 확인해주세요.</Text>
+            ) : null}
             <Text style={styles.aiLabel}>✦ AI가 정리한 일정</Text>
             <Card style={styles.resultCard}>
               <Pill>{result.category || '일정'}</Pill>
@@ -199,7 +215,7 @@ export function AiReviewScreen({ apiBusy, apiError, goTo, goBack, onCreate, pars
               <Text style={styles.resultLine}>⌖  장소   {result.location || '-'}</Text>
               <View style={styles.resultLineWithIcon}>
                 <UsersRound color={MUTED} size={15} strokeWidth={2.3} />
-                <Text style={styles.resultLine}>참여   나{result.participants?.length ? `, ${result.participants.join(', ')}` : ''} <Text style={styles.invite}>초대 전송 예정</Text></Text>
+                <Text style={styles.resultLine}>참여   나{participantText} <Text style={styles.invite}>초대 전송 예정</Text></Text>
               </View>
             </Card>
             <Card style={styles.toggleCard}>
@@ -292,6 +308,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     marginTop: 10,
+  },
+  warningText: {
+    backgroundColor: '#fff7e6',
+    borderRadius: 10,
+    color: '#b54708',
+    fontSize: 12,
+    fontWeight: '800',
+    lineHeight: 18,
+    marginTop: 10,
+    overflow: 'hidden',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
   },
   mentionCard: {
     borderColor: '#d8e6ff',

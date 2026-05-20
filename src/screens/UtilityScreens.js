@@ -1,10 +1,20 @@
 import { StyleSheet, Text, View } from 'react-native';
-import { Avatar, Card, Pill, Screen } from '../components/ui';
+import { Avatar, Card, Pill, PrimaryButton, Screen, SecondaryButton } from '../components/ui';
 import { BLUE, INK, LINE, MUTED } from '../data/yetiData';
 
-export function NotificationsScreen({ goBack }) {
+function formatDateTime(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${date.getMonth() + 1}월 ${date.getDate()}일 · ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function normalizeStatus(value) {
+  return String(value || 'PENDING').toUpperCase();
+}
+
+export function NotificationsScreen({ apiBusy, apiError, goBack, invitations = [], onInvitationAction }) {
   const items = [
-    ['박수아님이 약속에 초대했어요', '북한산 등산 · 5월 23일(토) 오전 9시', '방금', '#fff7ed'],
     ['학습이 끝났어요. 정리할 시간!', '영어 회화 스터디 · 카페 라운지에서 1시간 30분 집중', '12분', '#fdf4ff'],
     ['김지민', '내일 회의 자료 미리 보내드릴게요!', '34분', '#ecfeff'],
     ['15분 후 시작', '헬스 · 하체 데이 · 강남 핏니스에서', '1시간', '#eff6ff'],
@@ -20,6 +30,21 @@ export function NotificationsScreen({ goBack }) {
           <Text key={item} style={[styles.segmentItem, index === 0 && styles.segmentActive]}>{item}</Text>
         ))}
       </View>
+      {apiError ? <Text style={styles.errorText}>{apiError}</Text> : null}
+      <Text style={styles.groupLabel}>일정 초대</Text>
+      {invitations.length ? invitations.map((invitation) => (
+        <InvitationNotice
+          busy={apiBusy}
+          invitation={invitation}
+          key={invitation.id || invitation.participantId || invitation.scheduleId}
+          onAction={onInvitationAction}
+        />
+      )) : (
+        <Card style={styles.emptyCard}>
+          <Text style={styles.emptyTitle}>받은 일정 초대가 없습니다</Text>
+          <Text style={styles.emptyText}>친구가 함께 일정을 만들면 여기에서 수락하거나 거절할 수 있어요.</Text>
+        </Card>
+      )}
       <Text style={styles.groupLabel}>새 알림</Text>
       {items.slice(0, 4).map(([title, body, time, color]) => (
         <Notice key={title} title={title} body={body} time={time} color={color} unread />
@@ -29,6 +54,33 @@ export function NotificationsScreen({ goBack }) {
         <Notice key={title} title={title} body={body} time={time} color={color} />
       ))}
     </Screen>
+  );
+}
+
+function InvitationNotice({ busy, invitation, onAction }) {
+  const status = normalizeStatus(invitation.status);
+  const canRespond = !['ACCEPTED', 'REJECTED', 'DECLINED'].includes(status);
+  const owner = invitation.ownerName || invitation.ownerNickname || invitation.ownerUsername || '친구';
+  const title = invitation.title || invitation.scheduleTitle || '초대받은 일정';
+
+  return (
+    <Card style={styles.invitationCard}>
+      <View style={styles.invitationHeader}>
+        <Avatar label={owner.slice(0, 1)} color="#e8f1ff" size={38} />
+        <View style={styles.invitationText}>
+          <Text numberOfLines={1} style={styles.invitationTitle}>{owner}님의 일정 초대</Text>
+          <Text numberOfLines={1} style={styles.invitationBody}>{title}</Text>
+        </View>
+        <Pill tone={status === 'ACCEPTED' ? 'green' : status === 'REJECTED' ? 'yellow' : 'blue'}>{status}</Pill>
+      </View>
+      <Text style={styles.invitationMeta}>{invitation.category || '일정'} · {formatDateTime(invitation.startAt)} · {invitation.location || '-'}</Text>
+      {canRespond ? (
+        <View style={styles.invitationActions}>
+          <SecondaryButton style={styles.rejectButton} onPress={() => onAction?.(invitation, 'REJECT')}>거절</SecondaryButton>
+          <PrimaryButton style={styles.acceptButton} onPress={() => onAction?.(invitation, 'ACCEPT')}>{busy ? '처리 중' : '수락'}</PrimaryButton>
+        </View>
+      ) : null}
+    </Card>
   );
 }
 
@@ -120,6 +172,69 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     marginBottom: 8,
     marginTop: 4,
+  },
+  errorText: {
+    color: '#f04454',
+    fontSize: 12,
+    fontWeight: '800',
+    marginBottom: 10,
+  },
+  emptyCard: {
+    alignItems: 'center',
+    paddingVertical: 18,
+  },
+  emptyTitle: {
+    color: INK,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  emptyText: {
+    color: MUTED,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 18,
+    marginTop: 6,
+    textAlign: 'center',
+  },
+  invitationCard: {
+    gap: 12,
+  },
+  invitationHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+  },
+  invitationText: {
+    flex: 1,
+  },
+  invitationTitle: {
+    color: INK,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  invitationBody: {
+    color: MUTED,
+    fontSize: 12,
+    fontWeight: '800',
+    marginTop: 3,
+  },
+  invitationMeta: {
+    color: '#667085',
+    fontSize: 12,
+    fontWeight: '800',
+    lineHeight: 18,
+  },
+  invitationActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  rejectButton: {
+    flex: 1,
+    height: 42,
+  },
+  acceptButton: {
+    flex: 1,
+    height: 42,
   },
   noticeRow: {
     alignItems: 'center',

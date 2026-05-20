@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { MessageCircle, Plus, Search } from 'lucide-react-native';
 import { Avatar, Card, PrimaryButton, Screen, SecondaryButton, SectionTitle } from '../components/ui';
 import { BLUE, INK, LINE, MUTED } from '../data/yetiData';
@@ -16,15 +16,16 @@ function normalizeFriend(item, index) {
   }
 
   return {
-    friendshipId: item.friendshipId || item.id || `${item.username}-${index}`,
+    friendshipId: item.friendshipId || item.friendship_id || item.requestId || item.id || `${item.username}-${index}`,
     name: item.nickname || item.username || '사용자',
     handle: item.username ? `@${item.username}` : '',
     message: item.statusMessage || item.status || '함께 약속을 잡아보세요',
     initial: (item.nickname || item.username || '?').slice(0, 1),
+    raw: item,
   };
 }
 
-export function FriendsScreen({ apiError, friendRequests, friends, goTo, onBlockFriend, onDeleteFriend, onRequestAction, onSendRequest }) {
+export function FriendsScreen({ apiError, friendRequests, friends, goTo, onBlockFriend, onDeleteFriend, onOpenFriend, onRequestAction, onSendRequest }) {
   const [addVisible, setAddVisible] = useState(false);
   const requests = (friendRequests?.length ? friendRequests : []).map(normalizeFriend);
   const displayFriends = (friends || []).map(normalizeFriend);
@@ -70,7 +71,7 @@ export function FriendsScreen({ apiError, friendRequests, friends, goTo, onBlock
         <SectionTitle right="이름순⌄">친구 {displayFriends.length}</SectionTitle>
         {displayFriends.length ? (
           displayFriends.map((friend, index) => (
-            <Pressable key={friend.friendshipId} onPress={() => goTo?.('friendProfile')}>
+            <Pressable key={friend.friendshipId} onPress={() => onOpenFriend?.(friend.raw || friend)}>
               <Card style={styles.friend}>
               <Avatar label={friend.initial} color={['#a855f7', BLUE, '#0fbf73', '#fb923c', '#f04454'][index % 5]} />
               <View style={styles.text}>
@@ -111,7 +112,9 @@ function FriendAddSheet({ visible, onClose, onSendRequest }) {
     setBusy(true);
     setMessage('');
     try {
-      await onSendRequest?.(username.trim().replace(/^@/, ''));
+      const targetUsername = username.trim().replace(/^@/, '');
+      await onSendRequest?.(targetUsername);
+      setMessage(`@${targetUsername}님에게 친구 요청을 보냈습니다.`);
       setMessage('친구 요청을 보냈습니다.');
       setUsername('');
     } catch (error) {
@@ -121,11 +124,16 @@ function FriendAddSheet({ visible, onClose, onSendRequest }) {
     }
   };
 
+  if (!visible) return null;
+
   return (
-    <Modal transparent visible={visible} animationType="slide">
-      <View style={styles.modalBackdrop}>
-        <View style={styles.sheet}>
+    <View style={styles.modalBackdrop}>
+      <Pressable onPress={onClose} style={styles.backdropPressArea} />
+      <View style={styles.sheet}>
           <View style={styles.handleBar} />
+          <Pressable hitSlop={10} onPress={onClose} style={styles.closeButton}>
+            <Text style={styles.closeButtonText}>×</Text>
+          </Pressable>
           <Text style={styles.sheetTitle}>친구 추가</Text>
           <Text style={styles.sheetSub}>상대방의 username을 입력해 친구 요청을 보내세요.</Text>
           <TextInput
@@ -138,9 +146,8 @@ function FriendAddSheet({ visible, onClose, onSendRequest }) {
           />
           {message ? <Text style={styles.sheetMessage}>{message}</Text> : null}
           <PrimaryButton onPress={submit}>{busy ? '요청 중...' : '친구 요청 보내기'}</PrimaryButton>
-        </View>
       </View>
-    </Modal>
+    </View>
   );
 }
 
@@ -151,7 +158,7 @@ const styles = StyleSheet.create({
   headerIcon: {
     alignItems: 'center',
     height: 36,
-    justifyContent: 'center',
+    justifyContent: 'flex-end',
     width: 36,
   },
   searchBox: {
@@ -288,16 +295,47 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   modalBackdrop: {
+    alignItems: 'center',
     backgroundColor: 'rgba(17, 24, 39, 0.48)',
-    flex: 1,
-    justifyContent: 'flex-end',
+    bottom: 0,
+    justifyContent: 'center',
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    zIndex: 20,
+  },
+  backdropPressArea: {
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
   },
   sheet: {
     backgroundColor: '#ffffff',
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
+    maxWidth: 430,
     padding: 18,
-    paddingBottom: 30,
+    paddingBottom: 104,
+    width: '100%',
+  },
+  closeButton: {
+    alignItems: 'center',
+    borderRadius: 15,
+    height: 30,
+    justifyContent: 'center',
+    position: 'absolute',
+    right: 14,
+    top: 12,
+    width: 30,
+  },
+  closeButtonText: {
+    color: INK,
+    fontSize: 24,
+    fontWeight: '900',
+    lineHeight: 26,
   },
   handleBar: {
     alignSelf: 'center',
@@ -335,6 +373,9 @@ const styles = StyleSheet.create({
     height: 46,
     marginBottom: 12,
     paddingHorizontal: 14,
+  },
+  sendButton: {
+    marginTop: 4,
   },
   resultCard: {
     alignItems: 'center',

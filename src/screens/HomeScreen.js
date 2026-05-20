@@ -59,10 +59,36 @@ function getScheduleEndAt(item) {
   return item?.endAt || item?.end_at || item?.end || item?.endedAt || item?.endsAt || item?.data?.endAt || item?.result?.endAt;
 }
 
+function getRecurrenceRule(item) {
+  const recurrence = item?.recurrence;
+  if (typeof recurrence === 'string') return recurrence;
+  return item?.recurrenceRule
+    || item?.recurrence_rule
+    || item?.rrule
+    || item?.repeatRule
+    || item?.repeat_rule
+    || recurrence?.rule
+    || recurrence?.rrule
+    || '';
+}
+
+function isRecurring(item, rule) {
+  const recurrence = item?.recurrence;
+  return Boolean(
+    item?.recurring
+    || item?.isRecurring
+    || item?.repeat
+    || item?.repeating
+    || rule
+    || recurrence?.frequency
+    || recurrence?.type
+  );
+}
+
 function getWeeklyDays(item) {
   const startDate = new Date(getScheduleStartAt(item));
   const fallbackDay = Number.isNaN(startDate.getTime()) ? null : startDate.getDay();
-  const rule = String(item?.recurrenceRule || item?.rrule || '').toUpperCase();
+  const rule = String(getRecurrenceRule(item)).toUpperCase();
   const byDay = rule.match(/BYDAY=([^;]+)/)?.[1];
 
   if (!byDay) return fallbackDay === null ? [] : [fallbackDay];
@@ -82,9 +108,9 @@ function scheduleOccursOnDate(item, date) {
   if (Number.isNaN(startDate.getTime())) return false;
   if (getDateKey(startDate) === getDateKey(date)) return true;
 
-  const rule = String(item?.recurrenceRule || item?.rrule || '').toUpperCase();
-  const isWeekly = Boolean(item?.recurring || rule) && (!rule || rule.includes('FREQ=WEEKLY') || rule.includes('WEEKLY'));
-  if (!isWeekly) return false;
+  const rule = String(getRecurrenceRule(item)).toUpperCase();
+  const weekly = isRecurring(item, rule) && (!rule || rule.includes('FREQ=WEEKLY') || rule.includes('WEEKLY'));
+  if (!weekly) return false;
 
   const target = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const first = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
@@ -128,7 +154,7 @@ function normalizeSchedule(item, index) {
   };
 }
 
-export function HomeScreen({ apiError, goTo, onNewSchedule, onOpenSchedule, schedules }) {
+export function HomeScreen({ apiError, goTo, notificationCount = 0, onNewSchedule, onOpenSchedule, schedules }) {
   const today = useMemo(() => new Date(2026, 4, 20), []);
   const [visibleMonth, setVisibleMonth] = useState(() => new Date(2026, 4, 1));
   const [selectedDate, setSelectedDate] = useState(today);
@@ -167,6 +193,11 @@ export function HomeScreen({ apiError, goTo, onNewSchedule, onOpenSchedule, sche
           </Pressable>
           <Pressable onPress={() => goTo('notices')} style={styles.iconButton}>
             <Bell color={INK} size={18} strokeWidth={2.3} />
+            {notificationCount > 0 ? (
+              <View style={styles.notificationBadge}>
+                <Text style={styles.notificationBadgeText}>{notificationCount > 9 ? '9+' : notificationCount}</Text>
+              </View>
+            ) : null}
           </Pressable>
         </View>
       </View>
@@ -308,7 +339,28 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     height: 36,
     justifyContent: 'center',
+    position: 'relative',
     width: 36,
+  },
+  notificationBadge: {
+    alignItems: 'center',
+    backgroundColor: '#f04454',
+    borderColor: '#ffffff',
+    borderRadius: 8,
+    borderWidth: 1.5,
+    height: 15,
+    justifyContent: 'center',
+    minWidth: 15,
+    paddingHorizontal: 3,
+    position: 'absolute',
+    right: -2,
+    top: -3,
+  },
+  notificationBadgeText: {
+    color: '#ffffff',
+    fontSize: 8,
+    fontWeight: '900',
+    lineHeight: 10,
   },
   aiCard: {
     backgroundColor: INK,
