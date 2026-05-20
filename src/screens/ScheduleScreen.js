@@ -28,8 +28,9 @@ function normalizeParticipant(person, index) {
   };
 }
 
-export function ScheduleScreen({ apiError, goTo, goBack, onComplete, schedule }) {
+export function ScheduleScreen({ apiError, goTo, goBack, onComplete, onDelete, onOpenStudyNote, onParticipantStatus, onProposeAdjust, schedule }) {
   const [completeVisible, setCompleteVisible] = useState(false);
+  const [localError, setLocalError] = useState('');
   const detail = schedule;
   const participantList = (detail?.participants || []).map(normalizeParticipant);
   const scheduleId = detail?.scheduleId || detail?.id;
@@ -37,8 +38,23 @@ export function ScheduleScreen({ apiError, goTo, goBack, onComplete, schedule })
 
   const finish = async () => {
     if (!scheduleId || isCompleted) return;
-    await onComplete?.(scheduleId);
-    setCompleteVisible(true);
+    setLocalError('');
+    try {
+      await onComplete?.(scheduleId);
+      setCompleteVisible(true);
+    } catch (error) {
+      setLocalError(error.message || '완료 처리에 실패했습니다.');
+    }
+  };
+
+  const remove = async () => {
+    if (!scheduleId) return;
+    setLocalError('');
+    try {
+      await onDelete?.(scheduleId);
+    } catch (error) {
+      setLocalError(error.message || '일정 삭제에 실패했습니다.');
+    }
   };
 
   return (
@@ -49,7 +65,7 @@ export function ScheduleScreen({ apiError, goTo, goBack, onComplete, schedule })
         right="···"
         bottom={detail ? (
           <View style={styles.bottomButtons}>
-            <SecondaryButton onPress={() => goTo('scheduleEdit')}>새 일정</SecondaryButton>
+            <SecondaryButton onPress={() => goTo('scheduleEdit')}>수정</SecondaryButton>
             <PrimaryButton style={styles.primaryGrow} onPress={finish}>{isCompleted ? '완료됨' : '✓ 완료 처리'}</PrimaryButton>
           </View>
         ) : null}
@@ -58,12 +74,16 @@ export function ScheduleScreen({ apiError, goTo, goBack, onComplete, schedule })
           <>
             <Pill tone="yellow">{detail.category || '일정'}</Pill>
             <Text style={styles.title}>{detail.title}</Text>
-            {apiError ? <Text style={styles.errorText}>{apiError}</Text> : null}
+            {localError || apiError ? <Text style={styles.errorText}>{localError || apiError}</Text> : null}
             <Text style={styles.infoStrong}>▣  {formatDate(detail.startAt)}</Text>
             <Text style={styles.info}>{formatTime(detail.startAt)} - {formatTime(detail.endAt)}</Text>
             <Text style={styles.infoStrong}>⌖  {detail.location || '-'}</Text>
             <Text style={styles.info}>{detail.description || '메모가 없습니다.'}</Text>
             <Text style={styles.privacy}>⊙ {detail.visibility || 'PRIVATE'}</Text>
+            <View style={styles.quickActions}>
+              <SecondaryButton onPress={() => onOpenStudyNote?.(detail)} style={styles.quickButton}>학습 노트</SecondaryButton>
+              <SecondaryButton onPress={remove} style={styles.quickButton}>삭제</SecondaryButton>
+            </View>
             <Card style={styles.peopleCard}>
               <View style={styles.peopleHeader}>
                 <Text style={styles.peopleTitle}>참여자 {participantList.length}</Text>
@@ -76,11 +96,24 @@ export function ScheduleScreen({ apiError, goTo, goBack, onComplete, schedule })
                     <Text style={styles.personRole}>{person.role}</Text>
                   </View>
                   <Pill tone={person.status === 'ACCEPTED' ? 'green' : person.status === 'OWNER' ? 'gray' : 'blue'}>{person.status}</Pill>
+                  {scheduleId && person.id ? (
+                    <Text onPress={() => onParticipantStatus?.(scheduleId, person.id, { status: 'ACCEPTED' })} style={styles.acceptLink}>수락</Text>
+                  ) : null}
                 </View>
               )) : (
                 <Text style={styles.emptyText}>참여자 정보가 없습니다.</Text>
               )}
             </Card>
+            {scheduleId && participantList[0]?.id ? (
+              <PrimaryButton
+                onPress={() => onProposeAdjust?.(scheduleId, participantList[0].id, {
+                  proposedStart: detail.startAt,
+                  proposedEnd: detail.endAt,
+                })}
+              >
+                현재 시간으로 조율 제안
+              </PrimaryButton>
+            ) : null}
           </>
         ) : (
           <Card style={styles.emptyCard}>
@@ -186,6 +219,20 @@ const styles = StyleSheet.create({
   bottomButtons: {
     flexDirection: 'row',
     gap: 8,
+  },
+  quickActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 14,
+    marginTop: 8,
+  },
+  quickButton: {
+    flex: 1,
+  },
+  acceptLink: {
+    color: BLUE,
+    fontSize: 12,
+    fontWeight: '900',
   },
   primaryGrow: {
     flex: 1.5,

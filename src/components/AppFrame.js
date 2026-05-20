@@ -16,6 +16,16 @@ export function useHiddenWebScrollbars() {
         touch-action: manipulation;
         user-select: none;
       }
+      button, input, textarea, select, a, [role="button"] {
+        -webkit-tap-highlight-color: transparent;
+        outline: none !important;
+      }
+      input, textarea {
+        user-select: text;
+      }
+      * {
+        box-sizing: border-box;
+      }
       * { scrollbar-width: none; -ms-overflow-style: none; }
       *::-webkit-scrollbar { display: none; width: 0; height: 0; }
     `;

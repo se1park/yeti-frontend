@@ -206,7 +206,10 @@ async function parseResponse(response) {
     if (typeof message === 'string' && message.length > 140) {
       throw new Error(`요청에 실패했습니다. (${response.status})`);
     }
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
   }
 
   return payload;

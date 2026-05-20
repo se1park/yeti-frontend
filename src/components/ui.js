@@ -4,7 +4,7 @@ import { BLUE, INK, LINE, MUTED, SOFT } from '../data/yetiData';
 
 const pressedStyle = ({ pressed }) => [
   pressed && {
-    opacity: 0.78,
+    opacity: 0.88,
   },
 ];
 
@@ -312,7 +312,7 @@ const styles = StyleSheet.create({
     transform: [{ translateX: 20 }],
   },
   pressed: {
-    opacity: 0.7,
+    opacity: 0.88,
   },
 });
 

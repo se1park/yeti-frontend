@@ -197,20 +197,20 @@ function parseParticipants(value) {
     .filter(Boolean);
 }
 
-export function ScheduleEditScreen({ apiBusy, apiError, goBack, onCreate, onSaved }) {
+export function ScheduleEditScreen({ apiBusy, apiError, goBack, onCreate, onSaved, schedule }) {
   const now = new Date();
   const defaultStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours() + 1, 0);
   const defaultEnd = new Date(defaultStart.getTime() + 60 * 60 * 1000);
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [category, setCategory] = useState('약속');
-  const [startAt, setStartAt] = useState(toLocalInputValue(defaultStart));
-  const [endAt, setEndAt] = useState(toLocalInputValue(defaultEnd));
-  const [allDay, setAllDay] = useState(false);
-  const [location, setLocation] = useState('');
-  const [recurring, setRecurring] = useState(false);
-  const [recurrenceRule, setRecurrenceRule] = useState('');
-  const [visibility, setVisibility] = useState('PRIVATE');
+  const [title, setTitle] = useState(schedule?.title || '');
+  const [description, setDescription] = useState(schedule?.description || '');
+  const [category, setCategory] = useState(schedule?.category || '약속');
+  const [startAt, setStartAt] = useState(schedule?.startAt ? toLocalInputValue(new Date(schedule.startAt)) : toLocalInputValue(defaultStart));
+  const [endAt, setEndAt] = useState(schedule?.endAt ? toLocalInputValue(new Date(schedule.endAt)) : toLocalInputValue(defaultEnd));
+  const [allDay, setAllDay] = useState(Boolean(schedule?.allDay));
+  const [location, setLocation] = useState(schedule?.location || '');
+  const [recurring, setRecurring] = useState(Boolean(schedule?.recurring));
+  const [recurrenceRule, setRecurrenceRule] = useState(schedule?.recurrenceRule || '');
+  const [visibility, setVisibility] = useState(schedule?.visibility || 'PRIVATE');
   const [participants, setParticipants] = useState('');
   const [localError, setLocalError] = useState('');
 
@@ -258,7 +258,7 @@ export function ScheduleEditScreen({ apiBusy, apiError, goBack, onCreate, onSave
       onBack={goBack}
       onRight={submit}
       right={<Text style={styles.saveText}>{apiBusy ? '저장 중' : '저장'}</Text>}
-      title="일정 만들기"
+      title={schedule ? '일정 수정' : '일정 만들기'}
       bottom={<PrimaryButton onPress={submit}>{apiBusy ? '저장 중...' : '일정 저장'}</PrimaryButton>}
     >
       {localError || apiError ? <Text style={styles.errorText}>{localError || apiError}</Text> : null}

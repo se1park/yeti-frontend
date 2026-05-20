@@ -6,6 +6,8 @@ import { BLUE, INK, MUTED } from '../data/yetiData';
 
 const weekDays = ['일', '월', '화', '수', '목', '금', '토'];
 
+const dayCodeToIndex = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
+
 function pad(value) {
   return String(value).padStart(2, '0');
 }
@@ -49,22 +51,84 @@ function formatTime(value) {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function normalizeSchedule(item, index) {
-  const completed = Boolean(item.completed || item.status === 'COMPLETED');
+function getScheduleStartAt(item) {
+  return item?.startAt || item?.start_at || item?.start || item?.startedAt || item?.startsAt || item?.data?.startAt || item?.result?.startAt;
+}
+
+function getScheduleEndAt(item) {
+  return item?.endAt || item?.end_at || item?.end || item?.endedAt || item?.endsAt || item?.data?.endAt || item?.result?.endAt;
+}
+
+function getWeeklyDays(item) {
+  const startDate = new Date(getScheduleStartAt(item));
+  const fallbackDay = Number.isNaN(startDate.getTime()) ? null : startDate.getDay();
+  const rule = String(item?.recurrenceRule || item?.rrule || '').toUpperCase();
+  const byDay = rule.match(/BYDAY=([^;]+)/)?.[1];
+
+  if (!byDay) return fallbackDay === null ? [] : [fallbackDay];
+
+  const days = byDay
+    .split(',')
+    .map((value) => value.replace(/^[+-]?\d+/, '').trim())
+    .map((value) => dayCodeToIndex[value])
+    .filter((value) => value !== undefined);
+
+  return days.length ? days : fallbackDay === null ? [] : [fallbackDay];
+}
+
+function scheduleOccursOnDate(item, date) {
+  const startAt = getScheduleStartAt(item);
+  const startDate = new Date(startAt);
+  if (Number.isNaN(startDate.getTime())) return false;
+  if (getDateKey(startDate) === getDateKey(date)) return true;
+
+  const rule = String(item?.recurrenceRule || item?.rrule || '').toUpperCase();
+  const isWeekly = Boolean(item?.recurring || rule) && (!rule || rule.includes('FREQ=WEEKLY') || rule.includes('WEEKLY'));
+  if (!isWeekly) return false;
+
+  const target = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const first = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  if (target.getTime() < first.getTime()) return false;
+
+  return getWeeklyDays(item).includes(date.getDay());
+}
+
+function shiftOccurrenceToDate(item, date) {
+  const startDate = new Date(getScheduleStartAt(item));
+  const endDate = new Date(getScheduleEndAt(item));
+  if (Number.isNaN(startDate.getTime())) return item;
+
+  const nextStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), startDate.getHours(), startDate.getMinutes(), startDate.getSeconds());
+  const duration = Number.isNaN(endDate.getTime()) ? 60 * 60 * 1000 : Math.max(0, endDate.getTime() - startDate.getTime());
+  const nextEnd = new Date(nextStart.getTime() + duration);
 
   return {
+    ...item,
+    endAt: nextEnd.toISOString(),
+    occurrenceDate: getDateKey(date),
+    startAt: nextStart.toISOString(),
+  };
+}
+
+function normalizeSchedule(item, index) {
+  const completed = Boolean(item.completed || item.status === 'COMPLETED');
+  const startAt = getScheduleStartAt(item);
+  const endAt = getScheduleEndAt(item);
+
+  return {
+    ...item,
     id: item.scheduleId || item.id || `${item.title}-${index}`,
     title: item.title || '제목 없는 일정',
     meta: [item.category, item.location].filter(Boolean).join(' · ') || item.meta || '일정',
-    time: item.time || formatTime(item.startAt),
-    end: item.end || formatTime(item.endAt),
+    time: item.time || formatTime(startAt),
+    end: item.end || formatTime(endAt),
     color: completed ? '#cbd5e1' : item.color || [BLUE, '#0fbf73', '#d946ef', '#fb923c'][index % 4],
     completed,
     statusLabel: completed ? '완료' : '예정',
   };
 }
 
-export function HomeScreen({ apiError, goTo, schedules }) {
+export function HomeScreen({ apiError, goTo, onNewSchedule, onOpenSchedule, schedules }) {
   const today = useMemo(() => new Date(2026, 4, 20), []);
   const [visibleMonth, setVisibleMonth] = useState(() => new Date(2026, 4, 1));
   const [selectedDate, setSelectedDate] = useState(today);
@@ -72,11 +136,12 @@ export function HomeScreen({ apiError, goTo, schedules }) {
   const selectedKey = getDateKey(selectedDate);
   const todayKey = getDateKey(today);
   const selectedLabel = getDayLabel(selectedDate);
-  const displaySchedules = (schedules || []).map(normalizeSchedule);
-  const markedDayKeys = useMemo(() => new Set((schedules || []).map((item) => {
-    const date = new Date(item.startAt);
-    return Number.isNaN(date.getTime()) ? '' : getDateKey(date);
-  }).filter(Boolean)), [schedules]);
+  const displaySchedules = useMemo(() => (schedules || [])
+    .filter((item) => scheduleOccursOnDate(item, selectedDate))
+    .map((item, index) => normalizeSchedule(shiftOccurrenceToDate(item, selectedDate), index)), [schedules, selectedKey]);
+  const markedDayKeys = useMemo(() => new Set(calendarDays
+    .filter((day) => (schedules || []).some((item) => scheduleOccursOnDate(item, day.date)))
+    .map((day) => day.key)), [calendarDays, schedules]);
 
   const moveMonth = (amount) => {
     setVisibleMonth((current) => new Date(current.getFullYear(), current.getMonth() + amount, 1));
@@ -118,7 +183,7 @@ export function HomeScreen({ apiError, goTo, schedules }) {
             <Plus color="#ffffff" size={16} strokeWidth={2.5} />
             <Text style={styles.aiButtonText}>AI로 일정 만들기</Text>
           </Pressable>
-          <Pressable onPress={() => goTo('scheduleEdit')} style={styles.manualButton}>
+          <Pressable onPress={onNewSchedule} style={styles.manualButton}>
             <Text style={styles.manualButtonText}>직접 입력</Text>
           </Pressable>
         </View>
@@ -175,7 +240,7 @@ export function HomeScreen({ apiError, goTo, schedules }) {
       <SectionTitle right="전체 보기">{selectedDate.getDate() === today.getDate() && selectedDate.getMonth() === today.getMonth() ? '오늘 일정' : '선택한 날짜 일정'}</SectionTitle>
       {displaySchedules.length ? (
         displaySchedules.map((item) => (
-          <Pressable key={item.id || item.title} onPress={() => goTo('schedule')}>
+          <Pressable key={item.id || item.title} onPress={() => onOpenSchedule?.(item)}>
             <Card style={styles.scheduleRow}>
               <View style={styles.timeBlock}>
                 <Clock3 color={MUTED} size={14} strokeWidth={2.3} />

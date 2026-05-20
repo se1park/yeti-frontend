@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { MessageCircle, UsersRound } from 'lucide-react-native';
-import { Card, Pill, PrimaryButton, Screen, SecondaryButton, ToggleRow } from '../components/ui';
+import { Avatar, Card, Pill, PrimaryButton, Screen, SecondaryButton, ToggleRow } from '../components/ui';
 import { BLUE, INK, LINE, MUTED, quickPrompts } from '../data/yetiData';
 
 function formatDateTime(value) {
@@ -11,9 +11,78 @@ function formatDateTime(value) {
   return `${date.getMonth() + 1}월 ${date.getDate()}일 · ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
-export function AiInputScreen({ apiBusy, apiError, goTo, goBack, onParse }) {
+function formatTime(value) {
+  if (!value) return '--:--';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 5);
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function getRecurrenceLabel(result) {
+  if (result?.recurrenceLabel) return result.recurrenceLabel;
+  const byDay = String(result?.recurrenceRule || '').match(/BYDAY=([^;]+)/)?.[1];
+  const labels = { SU: '일요일', MO: '월요일', TU: '화요일', WE: '수요일', TH: '목요일', FR: '금요일', SA: '토요일' };
+  if (byDay && labels[byDay]) return `매주 ${labels[byDay]}`;
+  return result?.recurring ? '매주 반복' : '';
+}
+
+function formatScheduleDateLine(result) {
+  const recurrenceLabel = getRecurrenceLabel(result);
+  if (recurrenceLabel) {
+    return `${recurrenceLabel} · ${formatTime(result.startAt)} - ${formatTime(result.endAt)}`;
+  }
+  return `${formatDateTime(result.startAt)} - ${formatDateTime(result.endAt)}`;
+}
+
+function getMentionState(value, cursor) {
+  const beforeCursor = value.slice(0, cursor);
+  const match = beforeCursor.match(/(^|\s)@([A-Za-z0-9_.-]*)$/);
+  if (!match) return null;
+
+  return {
+    query: match[2].toLowerCase(),
+    start: beforeCursor.length - match[2].length - 1,
+  };
+}
+
+function normalizeFriend(friend, index) {
+  const username = friend?.username || friend?.handle || '';
+  const nickname = friend?.nickname || friend?.name || username || '친구';
+
+  return {
+    id: friend?.friendshipId || friend?.userId || username || `${index}`,
+    initial: (nickname || username || '?').slice(0, 1).toUpperCase(),
+    nickname,
+    statusMessage: friend?.statusMessage || '',
+    username,
+  };
+}
+
+export function AiInputScreen({ apiBusy, apiError, friends = [], goTo, goBack, onParse }) {
   const [text, setText] = useState('');
   const [localError, setLocalError] = useState('');
+  const [selection, setSelection] = useState({ end: 0, start: 0 });
+  const mentionState = getMentionState(text, selection.end);
+  const friendSuggestions = mentionState
+    ? friends
+      .map(normalizeFriend)
+      .filter((friend) => friend.username)
+      .filter((friend) => {
+        if (!mentionState.query) return true;
+        return friend.username.toLowerCase().includes(mentionState.query) || friend.nickname.toLowerCase().includes(mentionState.query);
+      })
+      .slice(0, 6)
+    : [];
+  const showMentionPicker = Boolean(mentionState);
+
+  const insertMention = (friend) => {
+    if (!mentionState || !friend.username) return;
+    const mention = `@${friend.username} `;
+    const nextText = `${text.slice(0, mentionState.start)}${mention}${text.slice(selection.end)}`;
+    const nextCursor = mentionState.start + mention.length;
+    setText(nextText);
+    setSelection({ end: nextCursor, start: nextCursor });
+  };
 
   const submit = async () => {
     if (!text.trim()) {
@@ -43,18 +112,40 @@ export function AiInputScreen({ apiBusy, apiError, goTo, goBack, onParse }) {
     >
       <TextInput
         multiline
-        value={text}
         onChangeText={setText}
+        onSelectionChange={(event) => setSelection(event.nativeEvent.selection)}
+        selection={selection}
+        value={text}
         placeholder="예) 내일 오후 2시 지민이랑 강남에서 회의"
         placeholderTextColor="#c6ccd7"
         style={styles.input}
         textAlignVertical="top"
       />
+      {showMentionPicker ? (
+        <Card style={styles.mentionCard}>
+          <Text style={styles.mentionTitle}>친구 선택</Text>
+          {friendSuggestions.length ? friendSuggestions.map((friend) => (
+            <Pressable key={friend.id} onPress={() => insertMention(friend)} style={({ pressed }) => [styles.mentionRow, pressed && styles.mentionPressed]}>
+              <Avatar label={friend.initial} size={34} />
+              <View style={styles.mentionText}>
+                <Text numberOfLines={1} style={styles.mentionName}>{friend.nickname}</Text>
+                <Text numberOfLines={1} style={styles.mentionUsername}>@{friend.username}</Text>
+              </View>
+              <Text style={styles.mentionAdd}>추가</Text>
+            </Pressable>
+          )) : (
+            <Text style={styles.mentionEmpty}>검색된 친구가 없습니다.</Text>
+          )}
+        </Card>
+      ) : null}
       {localError || apiError ? <Text style={styles.errorText}>{localError || apiError}</Text> : null}
       <Text style={styles.promptTitle}>이렇게 적으면 좋아요</Text>
       <View style={styles.promptWrap}>
         {quickPrompts.map((prompt) => (
-          <Pressable key={prompt} onPress={() => setText(prompt)}>
+          <Pressable key={prompt} onPress={() => {
+            setText(prompt);
+            setSelection({ end: prompt.length, start: prompt.length });
+          }}>
             <Text style={styles.prompt}>{prompt}</Text>
           </Pressable>
         ))}
@@ -104,7 +195,7 @@ export function AiReviewScreen({ apiBusy, apiError, goTo, goBack, onCreate, pars
             <Card style={styles.resultCard}>
               <Pill>{result.category || '일정'}</Pill>
               <Text style={styles.resultTitle}>{result.title || '제목 없는 일정'}</Text>
-              <Text style={styles.resultLine}>◷  일시   {formatDateTime(result.startAt)} - {formatDateTime(result.endAt)}</Text>
+              <Text style={styles.resultLine}>◷  일시   {formatScheduleDateLine(result)}</Text>
               <Text style={styles.resultLine}>⌖  장소   {result.location || '-'}</Text>
               <View style={styles.resultLineWithIcon}>
                 <UsersRound color={MUTED} size={15} strokeWidth={2.3} />
@@ -114,7 +205,7 @@ export function AiReviewScreen({ apiBusy, apiError, goTo, goBack, onCreate, pars
             <Card style={styles.toggleCard}>
               <ToggleRow label="채팅방 자동 생성" enabled />
               <ToggleRow label="15분 전 알림" enabled />
-              <ToggleRow label="매주 반복" />
+              <ToggleRow label="매주 반복" enabled={Boolean(result.recurring || result.recurrenceRule)} />
             </Card>
           </>
         ) : (
@@ -127,7 +218,10 @@ export function AiReviewScreen({ apiBusy, apiError, goTo, goBack, onCreate, pars
       <DoneSheet
         result={result}
         visible={doneVisible}
-        onClose={() => setDoneVisible(false)}
+        onClose={() => {
+          setDoneVisible(false);
+          goTo('home');
+        }}
         onChat={() => {
           setDoneVisible(false);
           goTo('chatRoom');
@@ -138,8 +232,10 @@ export function AiReviewScreen({ apiBusy, apiError, goTo, goBack, onCreate, pars
 }
 
 function DoneSheet({ result, visible, onClose, onChat }) {
+  if (!visible) return null;
+
   return (
-    <Modal transparent visible={visible} animationType="slide">
+    <>
       <View style={styles.modalBackdrop}>
         <View style={styles.sheet}>
           <View style={styles.handle} />
@@ -152,7 +248,7 @@ function DoneSheet({ result, visible, onClose, onChat }) {
             <Text style={styles.summaryIcon}>▣</Text>
             <View style={styles.summaryText}>
               <Text style={styles.summaryTitle}>{result?.title || '등록된 일정'}</Text>
-              <Text style={styles.summaryMeta}>{formatDateTime(result?.startAt)} · {result?.location || '-'}</Text>
+              <Text style={styles.summaryMeta}>{formatScheduleDateLine(result)} · {result?.location || '-'}</Text>
             </View>
           </View>
           <View style={styles.bottomButtons}>
@@ -166,7 +262,7 @@ function DoneSheet({ result, visible, onClose, onChat }) {
           </View>
         </View>
       </View>
-    </Modal>
+    </>
   );
 }
 
@@ -196,6 +292,55 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     marginTop: 10,
+  },
+  mentionCard: {
+    borderColor: '#d8e6ff',
+    marginBottom: 0,
+    marginTop: 10,
+    padding: 10,
+  },
+  mentionTitle: {
+    color: MUTED,
+    fontSize: 11,
+    fontWeight: '900',
+    marginBottom: 4,
+  },
+  mentionRow: {
+    alignItems: 'center',
+    borderRadius: 12,
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 48,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+  },
+  mentionPressed: {
+    backgroundColor: '#eef5ff',
+  },
+  mentionText: {
+    flex: 1,
+  },
+  mentionName: {
+    color: INK,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  mentionUsername: {
+    color: MUTED,
+    fontSize: 12,
+    fontWeight: '800',
+    marginTop: 2,
+  },
+  mentionAdd: {
+    color: BLUE,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  mentionEmpty: {
+    color: MUTED,
+    fontSize: 12,
+    fontWeight: '800',
+    padding: 10,
   },
   promptWrap: {
     flexDirection: 'row',
@@ -291,16 +436,24 @@ const styles = StyleSheet.create({
     flex: 1.55,
   },
   modalBackdrop: {
+    alignItems: 'center',
     backgroundColor: 'rgba(17, 24, 39, 0.48)',
-    flex: 1,
+    bottom: 0,
     justifyContent: 'flex-end',
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    zIndex: 20,
   },
   sheet: {
     backgroundColor: '#ffffff',
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
+    maxWidth: 430,
     padding: 22,
     paddingBottom: 30,
+    width: '100%',
   },
   handle: {
     alignSelf: 'center',

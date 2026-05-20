@@ -24,7 +24,7 @@ function normalizeFriend(item, index) {
   };
 }
 
-export function FriendsScreen({ apiError, friendRequests, friends, goTo, onRequestAction, onSendRequest }) {
+export function FriendsScreen({ apiError, friendRequests, friends, goTo, onBlockFriend, onDeleteFriend, onRequestAction, onSendRequest }) {
   const [addVisible, setAddVisible] = useState(false);
   const requests = (friendRequests?.length ? friendRequests : []).map(normalizeFriend);
   const displayFriends = (friends || []).map(normalizeFriend);
@@ -80,6 +80,8 @@ export function FriendsScreen({ apiError, friendRequests, friends, goTo, onReque
               <View style={styles.chatCircle}>
                 <MessageCircle color={BLUE} size={15} strokeWidth={2.4} />
               </View>
+              <Text onPress={() => onDeleteFriend?.(friend.friendshipId)} style={styles.friendAction}>삭제</Text>
+              <Text onPress={() => onBlockFriend?.(friend.friendshipId)} style={styles.blockAction}>차단</Text>
               </Card>
             </Pressable>
           ))
@@ -274,6 +276,16 @@ const styles = StyleSheet.create({
     height: 30,
     justifyContent: 'center',
     width: 30,
+  },
+  friendAction: {
+    color: MUTED,
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  blockAction: {
+    color: '#f04454',
+    fontSize: 11,
+    fontWeight: '900',
   },
   modalBackdrop: {
     backgroundColor: 'rgba(17, 24, 39, 0.48)',

@@ -67,6 +67,15 @@ import {
 } from './src/screens/SettingsScreens';
 
 const tabScreens = new Set(['home', 'chat', 'friends', 'my']);
+const weekdayPatterns = [
+  { code: 'SU', index: 0, label: '일요일', pattern: /(일요일|매주\s*일|일욜)/ },
+  { code: 'MO', index: 1, label: '월요일', pattern: /(월요일|매주\s*월|월욜)/ },
+  { code: 'TU', index: 2, label: '화요일', pattern: /(화요일|매주\s*화|화욜)/ },
+  { code: 'WE', index: 3, label: '수요일', pattern: /(수요일|매주\s*수|수욜)/ },
+  { code: 'TH', index: 4, label: '목요일', pattern: /(목요일|매주\s*목|목욜)/ },
+  { code: 'FR', index: 5, label: '금요일', pattern: /(금요일|매주\s*금|금욜)/ },
+  { code: 'SA', index: 6, label: '토요일', pattern: /(토요일|매주\s*토|토욜)/ },
+];
 
 function toArray(value) {
   if (Array.isArray(value)) return value;
@@ -74,6 +83,81 @@ function toArray(value) {
   if (Array.isArray(value?.result)) return value.result;
   if (Array.isArray(value?.content)) return value.content;
   return [];
+}
+
+function unwrapApiValue(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  if (value.data && typeof value.data === 'object') return unwrapApiValue(value.data);
+  if (value.result && typeof value.result === 'object') return unwrapApiValue(value.result);
+  if (value.payload && typeof value.payload === 'object') return unwrapApiValue(value.payload);
+  return value;
+}
+
+function normalizeScheduleValue(value) {
+  const item = unwrapApiValue(value);
+  if (!item || typeof item !== 'object') return item;
+  const startAt = item.startAt || item.start_at || item.start || item.startedAt || item.startsAt;
+  const endAt = item.endAt || item.end_at || item.end || item.endedAt || item.endsAt;
+  return {
+    ...item,
+    id: item.id || item.scheduleId,
+    recurrenceRule: item.recurrenceRule || item.recurrence_rule || item.rrule || '',
+    recurring: Boolean(item.recurring || item.recurrenceRule || item.recurrence_rule || item.rrule),
+    scheduleId: item.scheduleId || item.id,
+    startAt,
+    endAt,
+    title: item.title || item.name || '제목 없는 일정',
+  };
+}
+
+function normalizeScheduleList(value) {
+  return toArray(value).map(normalizeScheduleValue).filter(Boolean);
+}
+
+function getMentionedUsernames(value) {
+  return Array.from(new Set(String(value || '')
+    .match(/@[A-Za-z0-9_.-]+/g)
+    ?.map((item) => item.slice(1))
+    .filter(Boolean) || []));
+}
+
+function detectWeeklyWeekday(input) {
+  const text = String(input || '').replace(/\s+/g, ' ');
+  if (!/(매주|매\s*주|weekly|every week)/i.test(text)) return null;
+  return weekdayPatterns.find((day) => day.pattern.test(text)) || null;
+}
+
+function moveScheduleToWeekday(schedule, weekday) {
+  if (!weekday?.code || !schedule?.startAt) return schedule;
+
+  const start = new Date(schedule.startAt);
+  if (Number.isNaN(start.getTime())) return schedule;
+
+  const end = new Date(schedule.endAt);
+  const duration = Number.isNaN(end.getTime()) ? 60 * 60 * 1000 : Math.max(0, end.getTime() - start.getTime());
+  const daysToAdd = (weekday.index - start.getDay() + 7) % 7 || 7;
+  const nextStart = new Date(start);
+
+  if (start.getDay() !== weekday.index) {
+    nextStart.setDate(start.getDate() + daysToAdd);
+  }
+
+  const nextEnd = new Date(nextStart.getTime() + duration);
+
+  return {
+    ...schedule,
+    endAt: nextEnd.toISOString(),
+    recurrenceLabel: `매주 ${weekday.label}`,
+    recurrenceRule: `FREQ=WEEKLY;BYDAY=${weekday.code}`,
+    recurring: true,
+    startAt: nextStart.toISOString(),
+  };
+}
+
+function refineParsedScheduleFromInput(schedule, input) {
+  const weeklyDay = detectWeeklyWeekday(input);
+  if (!weeklyDay) return schedule;
+  return moveScheduleToWeekday(schedule, weeklyDay);
 }
 
 Text.defaultProps = Text.defaultProps || {};
@@ -101,6 +185,7 @@ export default function App() {
   const [friends, setFriends] = useState([]);
   const [friendRequests, setFriendRequests] = useState([]);
   const [parsedSchedule, setParsedSchedule] = useState(null);
+  const [parsedScheduleInput, setParsedScheduleInput] = useState('');
   const [selectedSchedule, setSelectedSchedule] = useState(null);
   const [studyNotes, setStudyNotes] = useState([]);
   const [chatRooms, setChatRooms] = useState([]);
@@ -158,6 +243,33 @@ export default function App() {
     }
   }, [expireSession, session]);
 
+  const runWithProtectedToken = useCallback(async (requester) => {
+    const token = await getProtectedToken();
+
+    try {
+      return await requester(token);
+    } catch (error) {
+      if (![401, 403].includes(error?.status) || !session?.refreshToken) {
+        throw error;
+      }
+
+      const refreshed = await refresh(session.refreshToken);
+      const nextSession = {
+        ...session,
+        ...refreshed,
+        accessToken: refreshed.accessToken || session.accessToken,
+        refreshToken: refreshed.refreshToken || session.refreshToken,
+        user: {
+          ...(session.user || {}),
+          ...(refreshed.user || {}),
+        },
+      };
+      await saveSession(nextSession);
+      setSession(nextSession);
+      return requester(nextSession.accessToken);
+    }
+  }, [getProtectedToken, session]);
+
   useEffect(() => {
     if (!session?.accessToken || session.newUser) return;
 
@@ -173,7 +285,7 @@ export default function App() {
       if (cancelled) return;
 
       if (scheduleResult.status === 'fulfilled') {
-        setSchedules(toArray(scheduleResult.value));
+        setSchedules(normalizeScheduleList(scheduleResult.value));
       }
       if (friendResult.status === 'fulfilled') {
         setFriends(toArray(friendResult.value));
@@ -358,10 +470,12 @@ export default function App() {
     try {
       const token = await getProtectedToken();
       const payload = await parseSchedule(input, token);
-      setParsedSchedule(payload);
+      const parsed = refineParsedScheduleFromInput(normalizeScheduleValue(payload), input);
+      setParsedSchedule(parsed);
+      setParsedScheduleInput(input);
       setHistory((previous) => [...previous, screen]);
       setScreen('aiReview');
-      return payload;
+      return parsed;
     } catch (error) {
       setApiError(error.message || 'AI 일정 파싱에 실패했습니다.');
       throw error;
@@ -372,6 +486,7 @@ export default function App() {
 
   const handleCreateParsedSchedule = async () => {
     if (!session?.accessToken || !parsedSchedule) return;
+    const participantUsernames = getMentionedUsernames(parsedScheduleInput);
 
     const body = {
       title: parsedSchedule.title,
@@ -381,17 +496,18 @@ export default function App() {
       endAt: parsedSchedule.endAt,
       allDay: Boolean(parsedSchedule.allDay),
       location: parsedSchedule.location || '',
-      recurring: false,
-      visibility: 'FRIENDS',
-      participantUsernames: parsedSchedule.participants || [],
+      recurring: Boolean(parsedSchedule.recurring || parsedSchedule.recurrenceRule),
+      recurrenceRule: parsedSchedule.recurrenceRule || '',
+      visibility: participantUsernames.length ? 'FRIENDS' : 'PRIVATE',
+      participantUsernames,
     };
 
     setApiBusy(true);
     setApiError('');
     try {
-      const token = await getProtectedToken();
-      const created = await createSchedule(body, token);
+      const created = normalizeScheduleValue(await runWithProtectedToken((token) => createSchedule(body, token)));
       setSchedules((previous) => [created, ...previous]);
+      setSelectedSchedule(created);
       return created;
     } catch (error) {
       setApiError(error.message || '일정 생성에 실패했습니다.');
@@ -409,9 +525,9 @@ export default function App() {
     setApiBusy(true);
     setApiError('');
     try {
-      const token = await getProtectedToken();
-      const created = await createSchedule(body, token);
+      const created = normalizeScheduleValue(await runWithProtectedToken((token) => createSchedule(body, token)));
       setSchedules((previous) => [created, ...previous]);
+      setSelectedSchedule(created);
       return created;
     } catch (error) {
       setApiError(error.message || '일정 생성에 실패했습니다.');
@@ -429,11 +545,12 @@ export default function App() {
       return;
     }
 
-    setSelectedSchedule(schedule);
+    const normalizedSchedule = normalizeScheduleValue(schedule);
+    setSelectedSchedule(normalizedSchedule);
     setApiError('');
     try {
       const token = await getProtectedToken();
-      const detail = await getSchedule(scheduleId, token);
+      const detail = normalizeScheduleValue(await getSchedule(scheduleId, token));
       setSelectedSchedule(detail);
     } catch (error) {
       setApiError(error.message || '일정 상세 조회에 실패했습니다.');
@@ -442,13 +559,18 @@ export default function App() {
     }
   };
 
+  const handleNewSchedule = () => {
+    setSelectedSchedule(null);
+    goTo('scheduleEdit');
+  };
+
   const handleUpdateSchedule = async (scheduleId, body) => {
     if (!session?.accessToken || !scheduleId) throw new Error('수정할 일정을 찾을 수 없습니다.');
     setApiBusy(true);
     setApiError('');
     try {
       const token = await getProtectedToken();
-      const updated = await updateSchedule(scheduleId, body, token);
+      const updated = normalizeScheduleValue(await updateSchedule(scheduleId, body, token));
       setSelectedSchedule(updated);
       setSchedules((previous) => previous.map((item) => ((item.scheduleId || item.id) === scheduleId ? { ...item, ...updated } : item)));
       return updated;
@@ -535,6 +657,86 @@ export default function App() {
     return sent;
   };
 
+  const handleDeleteFriend = async (friendshipId) => {
+    const token = await getProtectedToken();
+    await deleteFriend(friendshipId, token);
+    setFriends((previous) => previous.filter((item) => item.friendshipId !== friendshipId));
+  };
+
+  const handleBlockFriend = async (friendshipId) => {
+    const token = await getProtectedToken();
+    await blockUser(friendshipId, token);
+    setFriends((previous) => previous.filter((item) => item.friendshipId !== friendshipId));
+  };
+
+  const handleOpenStudyNote = async (schedule = selectedSchedule || schedules[0]) => {
+    const scheduleId = schedule?.scheduleId || schedule?.id;
+    setSelectedSchedule(schedule || null);
+    setStudyNotes([]);
+    if (scheduleId) {
+      try {
+        const token = await getProtectedToken();
+        setStudyNotes(toArray(await getStudyNotes(scheduleId, token)));
+      } catch (error) {
+        setApiError(error.message || '학습 노트를 불러오지 못했습니다.');
+      }
+    }
+    goTo('studyNote');
+  };
+
+  const handleCreateStudyNote = async (body) => {
+    const token = await getProtectedToken();
+    const created = await createStudyNote(body, token);
+    setStudyNotes((previous) => [created, ...previous]);
+    return created;
+  };
+
+  const handleSummarizeStudyNote = async (noteId) => {
+    const token = await getProtectedToken();
+    const summarized = await summarizeStudyNote(noteId, token);
+    setStudyNotes((previous) => previous.map((note) => (note.id === noteId ? summarized : note)));
+    return summarized;
+  };
+
+  const handleOpenChatRoom = async (room) => {
+    setSelectedRoom(room);
+    setChatMessages([]);
+    if (room?.id) {
+      try {
+        const token = await getProtectedToken();
+        setChatMessages(toArray(await getChatMessages(room.id, token, { size: 50 })));
+      } catch (error) {
+        setApiError(error.message || '채팅 메시지를 불러오지 못했습니다.');
+      }
+    }
+    goTo('chatRoom');
+  };
+
+  const handleCreateChatRoom = async (body) => {
+    const token = await getProtectedToken();
+    const created = await createChatRoom(body, token);
+    setChatRooms((previous) => [created, ...previous]);
+    return created;
+  };
+
+  const handleReactMessage = async (messageId, emoji) => {
+    const token = await getProtectedToken();
+    const updated = await reactToChatMessage(messageId, emoji, token);
+    setChatMessages((previous) => previous.map((message) => (message.id === messageId ? updated : message)));
+    return updated;
+  };
+
+  const handleDeleteMessage = async (messageId) => {
+    const token = await getProtectedToken();
+    await deleteChatMessage(messageId, token);
+    setChatMessages((previous) => previous.filter((message) => message.id !== messageId));
+  };
+
+  const handleCreateMediaUpload = async (roomId, contentType) => {
+    const token = await getProtectedToken();
+    return getChatMediaUploadUrl(roomId, { contentType }, token);
+  };
+
   const content = useMemo(() => {
     if (!fontsLoaded) return null;
     if (screen === 'intro') return <IntroScreen onNext={() => goTo('login')} />;
@@ -553,14 +755,28 @@ export default function App() {
     if (screen === 'kakaoConsent') return <KakaoConsentScreen busy={authBusy} error={authError} onCancel={goBack} onContinue={(token) => handleOAuth('kakao', token)} />;
     if (screen === 'onboardingSetup') return <KakaoConsentScreen busy={authBusy} error={authError} onboardingOnly onCancel={handleLogout} onOnboarding={handleOnboarding} session={session} />;
 
-    if (screen === 'home') return <HomeScreen apiError={apiError} goTo={goTo} schedules={schedules} />;
-    if (screen === 'ai') return <AiInputScreen apiBusy={apiBusy} apiError={apiError} goTo={goTo} goBack={goBack} onParse={handleParseSchedule} />;
+    if (screen === 'home') return <HomeScreen apiError={apiError} goTo={goTo} onNewSchedule={handleNewSchedule} onOpenSchedule={handleOpenSchedule} schedules={schedules} />;
+    if (screen === 'ai') return <AiInputScreen apiBusy={apiBusy} apiError={apiError} friends={friends} goTo={goTo} goBack={goBack} onParse={handleParseSchedule} />;
     if (screen === 'aiReview') return <AiReviewScreen apiBusy={apiBusy} apiError={apiError} goTo={goTo} goBack={goBack} onCreate={handleCreateParsedSchedule} parsedSchedule={parsedSchedule} />;
-    if (screen === 'schedule') return <ScheduleScreen apiError={apiError} goTo={goTo} goBack={goBack} onComplete={handleCompleteSchedule} schedule={schedules[0]} />;
-    if (screen === 'chat') return <ChatListScreen goTo={goTo} />;
-    if (screen === 'chatRoom') return <ChatRoomScreen goTo={goTo} goBack={goBack} />;
-    if (screen === 'friends') return <FriendsScreen apiError={apiError} friendRequests={friendRequests} friends={friends} goTo={goTo} onRequestAction={handleFriendRequestAction} onSendRequest={handleSendFriendRequest} />;
-    if (screen === 'studyNote') return <StudyNoteScreen goBack={goBack} />;
+    if (screen === 'schedule') {
+      return (
+        <ScheduleScreen
+          apiError={apiError}
+          goTo={goTo}
+          goBack={goBack}
+          onComplete={handleCompleteSchedule}
+          onDelete={handleDeleteSchedule}
+          onOpenStudyNote={handleOpenStudyNote}
+          onParticipantStatus={handleParticipantStatus}
+          onProposeAdjust={handleProposeAdjust}
+          schedule={selectedSchedule || schedules[0]}
+        />
+      );
+    }
+    if (screen === 'chat') return <ChatListScreen apiError={apiError} goTo={goTo} onCreateRoom={handleCreateChatRoom} onOpenRoom={handleOpenChatRoom} rooms={chatRooms} />;
+    if (screen === 'chatRoom') return <ChatRoomScreen goTo={goTo} goBack={goBack} messages={chatMessages} onCreateMediaUpload={handleCreateMediaUpload} onDeleteMessage={handleDeleteMessage} onReactMessage={handleReactMessage} room={selectedRoom} />;
+    if (screen === 'friends') return <FriendsScreen apiError={apiError} friendRequests={friendRequests} friends={friends} goTo={goTo} onBlockFriend={handleBlockFriend} onDeleteFriend={handleDeleteFriend} onRequestAction={handleFriendRequestAction} onSendRequest={handleSendFriendRequest} />;
+    if (screen === 'studyNote') return <StudyNoteScreen apiError={apiError} goBack={goBack} notes={studyNotes} onCreateNote={handleCreateStudyNote} onSummarizeNote={handleSummarizeStudyNote} schedule={selectedSchedule || schedules[0]} />;
     if (screen === 'notices') return <NotificationsScreen goBack={goBack} />;
     if (screen === 'admin') return <AdminScreen goBack={goBack} />;
     if (screen === 'profileEdit') return <ProfileEditScreen goBack={goBack} session={session} />;
@@ -576,8 +792,9 @@ export default function App() {
           apiBusy={apiBusy}
           apiError={apiError}
           goBack={goBack}
-          onCreate={handleCreateManualSchedule}
+          onCreate={selectedSchedule ? (body) => handleUpdateSchedule(selectedSchedule.scheduleId || selectedSchedule.id, body) : handleCreateManualSchedule}
           onSaved={() => switchTab('home')}
+          schedule={selectedSchedule}
         />
       );
     }
@@ -585,7 +802,7 @@ export default function App() {
     if (screen === 'chatSettings') return <ChatSettingsScreen goBack={goBack} />;
     if (screen === 'chatSearch') return <ChatSearchScreen goBack={goBack} />;
     return <ProfileScreen authError={authError} goTo={goTo} onLogout={handleLogout} onRefreshPlan={refreshPlan} plan={plan} session={session} />;
-  }, [screen, history, session, plan, authError, authNotice, authBusy, apiError, schedules, friends, friendRequests, parsedSchedule, apiBusy, fontsLoaded]);
+  }, [screen, history, session, plan, authError, authNotice, authBusy, apiError, schedules, friends, friendRequests, parsedSchedule, parsedScheduleInput, selectedSchedule, studyNotes, chatRooms, selectedRoom, chatMessages, apiBusy, fontsLoaded, runWithProtectedToken]);
 
   return (
     <AppFrame>
