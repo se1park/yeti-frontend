@@ -77,6 +77,7 @@ function createWindow() {
       nodeIntegration: false,
       preload: path.join(__dirname, 'preload.js'),
       sandbox: true,
+      webSecurity: !isDev,
     },
     width: 1280,
   });

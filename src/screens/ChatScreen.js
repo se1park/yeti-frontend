@@ -89,9 +89,17 @@ export function ChatListScreen({ apiError, goTo, onCreateRoom, onOpenRoom, rooms
   );
 }
 
-export function ChatRoomScreen({ goTo, goBack, messages, onCreateMediaUpload, onDeleteMessage, onReactMessage, room }) {
+export function ChatRoomScreen({ chatStatus, goTo, goBack, messages, onCreateMediaUpload, onDeleteMessage, onReactMessage, onSendMessage, room }) {
   const [notice, setNotice] = useState('');
+  const [draft, setDraft] = useState('');
   const roomTitle = room?.name || '채팅방';
+  const connected = chatStatus?.status === 'connected';
+  const statusLabel = {
+    connected: '실시간 연결됨',
+    connecting: '실시간 연결 중',
+    disconnected: '실시간 연결 끊김',
+    error: '실시간 연결 실패',
+  }[chatStatus?.status || 'connecting'];
 
   const media = async () => {
     if (!room?.id) return;
@@ -103,15 +111,46 @@ export function ChatRoomScreen({ goTo, goBack, messages, onCreateMediaUpload, on
     }
   };
 
+  const submit = async () => {
+    if (!draft.trim()) return;
+    try {
+      await onSendMessage?.(room?.id, draft);
+      setDraft('');
+    } catch (error) {
+      setNotice(error.message || '메시지를 전송하지 못했습니다.');
+    }
+  };
+
   return (
     <Screen
       left="‹"
       onBack={goBack}
       title={roomTitle}
       subtitle={room?.type || ''}
-      right={<Pressable onPress={() => goTo('chatSettings')}><Text style={styles.headerIcon}>···</Text></Pressable>}
-      bottom={<View style={styles.chatInput}><Text style={styles.chatInputText}>메시지 전송 API 미제공</Text><PrimaryButton onPress={media} style={styles.sendButton}>미디어</PrimaryButton></View>}
+      bottom={(
+        <View style={styles.chatComposer}>
+          <TextInput
+            onChangeText={setDraft}
+            onSubmitEditing={submit}
+            placeholder="메시지를 입력하세요"
+            placeholderTextColor="#a0a8b5"
+            style={styles.chatInput}
+            value={draft}
+          />
+          <Pressable onPress={media} style={styles.mediaButton}>
+            <Text style={styles.mediaButtonText}>미디어</Text>
+          </Pressable>
+          <Pressable disabled={!connected || !draft.trim()} onPress={submit} style={[styles.sendButton, (!connected || !draft.trim()) && styles.sendButtonDisabled]}>
+            <Text style={styles.sendButtonText}>전송</Text>
+          </Pressable>
+        </View>
+      )}
     >
+      <View style={styles.statusRow}>
+        <Text style={[styles.statusDot, connected && styles.statusDotConnected]}>●</Text>
+        <Text style={styles.statusText}>{statusLabel}</Text>
+        {chatStatus?.message ? <Text numberOfLines={1} style={styles.statusMessage}>{chatStatus.message}</Text> : null}
+      </View>
       {notice ? <Text style={styles.errorText}>{notice}</Text> : null}
       {(messages || []).length ? messages.map((item) => (
         <View key={item.id} style={styles.messageBlock}>
@@ -135,6 +174,7 @@ export function ChatRoomScreen({ goTo, goBack, messages, onCreateMediaUpload, on
 function RoomCreateSheet({ visible, onClose, onCreateRoom }) {
   const [name, setName] = useState('');
   const [members, setMembers] = useState('');
+  const [pinnedScheduleId, setPinnedScheduleId] = useState('');
   const [message, setMessage] = useState('');
 
   const submit = async () => {
@@ -148,9 +188,11 @@ function RoomCreateSheet({ visible, onClose, onCreateRoom }) {
         type: memberUsernames.length > 1 ? 'GROUP' : 'DIRECT',
         name: name.trim(),
         memberUsernames,
+        ...(pinnedScheduleId.trim() ? { pinnedScheduleId: pinnedScheduleId.trim() } : {}),
       });
       setName('');
       setMembers('');
+      setPinnedScheduleId('');
       setMessage('');
       onClose?.();
     } catch (error) {
@@ -170,6 +212,7 @@ function RoomCreateSheet({ visible, onClose, onCreateRoom }) {
           </View>
           <TextInput value={name} onChangeText={setName} placeholder="방 이름" placeholderTextColor="#a0a8b5" style={styles.sheetInput} />
           <TextInput value={members} onChangeText={setMembers} placeholder="username, username" placeholderTextColor="#a0a8b5" style={styles.sheetInput} />
+          <TextInput value={pinnedScheduleId} onChangeText={setPinnedScheduleId} placeholder="pinnedScheduleId (선택)" placeholderTextColor="#a0a8b5" style={styles.sheetInput} />
           {message ? <Text style={styles.errorText}>{message}</Text> : null}
           <PrimaryButton onPress={submit}>생성</PrimaryButton>
         </View>
@@ -245,9 +288,59 @@ const styles = StyleSheet.create({
   messageActions: { alignItems: 'center', flexDirection: 'row', gap: 12, marginBottom: 4 },
   actionText: { color: BLUE, fontSize: 13, fontWeight: '900' },
   deleteText: { color: '#f04454', fontSize: 12, fontWeight: '900' },
-  chatInput: { alignItems: 'center', backgroundColor: '#f4f6f8', borderRadius: 20, flexDirection: 'row', gap: 10, paddingLeft: 16, paddingRight: 4, paddingVertical: 4 },
-  chatInputText: { color: '#a0a8b5', flex: 1, fontSize: 13, fontWeight: '700' },
-  sendButton: { height: 38, width: 78 },
+  chatComposer: {
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderColor: LINE,
+    borderRadius: 10,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 52,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  chatInput: {
+    color: INK,
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '700',
+    height: 36,
+    outlineStyle: 'none',
+    paddingHorizontal: 2,
+  },
+  mediaButton: {
+    alignItems: 'center',
+    backgroundColor: '#f3f6fb',
+    borderColor: LINE,
+    borderRadius: 8,
+    borderWidth: 1,
+    height: 36,
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+  },
+  mediaButtonText: { color: MUTED, fontSize: 12, fontWeight: '900' },
+  sendButton: {
+    alignItems: 'center',
+    backgroundColor: BLUE,
+    borderRadius: 8,
+    height: 36,
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+  },
+  sendButtonDisabled: {
+    opacity: 0.42,
+  },
+  sendButtonText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  statusDot: { color: '#f04454', fontSize: 11, fontWeight: '900' },
+  statusDotConnected: { color: '#12b76a' },
+  statusMessage: { color: '#f04454', flex: 1, fontSize: 11, fontWeight: '800' },
+  statusRow: { alignItems: 'center', flexDirection: 'row', gap: 6, marginBottom: 10 },
+  statusText: { color: MUTED, fontSize: 12, fontWeight: '900' },
   modalBackdrop: { alignItems: Platform.OS === 'web' ? 'center' : 'stretch', backgroundColor: 'rgba(17, 24, 39, 0.48)', flex: 1, justifyContent: Platform.OS === 'web' ? 'center' : 'flex-end', padding: Platform.OS === 'web' ? 24 : 0 },
   sheet: { backgroundColor: '#ffffff', borderRadius: Platform.OS === 'web' ? 18 : 0, borderTopLeftRadius: 18, borderTopRightRadius: 18, maxWidth: Platform.OS === 'web' ? 460 : undefined, padding: 18, paddingBottom: 30, width: '100%' },
   sheetHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },

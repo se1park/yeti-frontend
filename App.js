@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Text, TextInput, View } from 'react-native';
 import { useFonts } from 'expo-font';
 import { AppFrame, useHiddenWebScrollbars } from './src/components/AppFrame';
@@ -13,6 +13,7 @@ import { FriendProfileScreen } from './src/screens/FriendProfileScreen';
 import { ProfileScreen } from './src/screens/ProfileScreen';
 import { StudyNoteScreen } from './src/screens/StudyNoteScreen';
 import { AdminScreen, ApiDiagnosticsScreen, NotificationsScreen } from './src/screens/UtilityScreens';
+import { createChatSocketClient, publishChatMessage } from './src/api/chatSocket';
 import {
   clearSession,
   completeOnboarding,
@@ -111,6 +112,9 @@ function toArray(value) {
   if (Array.isArray(value?.friendRequests)) return value.friendRequests;
   if (Array.isArray(value?.received)) return value.received;
   if (Array.isArray(value?.incoming)) return value.incoming;
+  if (Array.isArray(value?.sent)) return value.sent;
+  if (Array.isArray(value?.outgoing)) return value.outgoing;
+  if (Array.isArray(value?.pending)) return value.pending;
   if (value && typeof value === 'object') {
     const nestedArray = Object.values(value).find(Array.isArray);
     if (nestedArray) return nestedArray;
@@ -362,6 +366,77 @@ function getFriendUsername(friend) {
   return friend?.username || friend?.handle?.replace(/^@/, '') || friend?.raw?.username || '';
 }
 
+function normalizeFriendUsername(value) {
+  return String(value || '').trim().replace(/^@/, '').toLowerCase();
+}
+
+function normalizeChatRoomValue(room, index = 0) {
+  if (!room || typeof room !== 'object') return null;
+  const id = room.id || room.roomId || room.chatRoomId || room.uuid;
+  return {
+    ...room,
+    id: id || `${room.name || 'room'}-${index}`,
+    memberCount: Number(room.memberCount ?? room.membersCount ?? room.member_count ?? 0),
+    name: room.name || room.title || '채팅방',
+    thumbnailUrl: room.thumbnailUrl || room.thumbnailURL || room.imageUrl || '',
+    type: room.type || 'DM',
+    unreadCount: Number(room.unreadCount ?? room.unread_count ?? room.unread ?? 0),
+  };
+}
+
+function normalizeChatRooms(value) {
+  return toArray(value).map(normalizeChatRoomValue).filter(Boolean);
+}
+
+function normalizeChatMessageValue(message, index = 0) {
+  if (!message || typeof message !== 'object') return null;
+  const id = message.id || message.messageId || message.uuid;
+  return {
+    ...message,
+    content: message.content || message.text || '',
+    createdAt: message.createdAt || message.created_at || '',
+    deleted: Boolean(message.deleted),
+    id: id || `${message.createdAt || 'message'}-${index}`,
+    mediaUrl: message.mediaUrl || message.mediaURL || message.imageUrl || '',
+    messageType: message.messageType || message.type || 'TEXT',
+    reactions: message.reactions || '',
+    replyToId: message.replyToId || message.reply_to_id || null,
+    senderId: message.senderId || message.sender_id || '',
+    senderNickname: message.senderNickname || message.senderName || message.nickname || '',
+    senderProfileUrl: message.senderProfileUrl || message.senderProfileURL || message.senderProfileImageUrl || '',
+  };
+}
+
+function normalizeChatMessages(value) {
+  return toArray(value).map(normalizeChatMessageValue).filter(Boolean);
+}
+
+function mergeChatMessages(previous, incoming) {
+  const map = new Map();
+  [...previous, ...toArray(incoming).map(normalizeChatMessageValue).filter(Boolean)].forEach((message) => {
+    if (message?.id) map.set(message.id, { ...(map.get(message.id) || {}), ...message });
+  });
+  return Array.from(map.values()).sort((a, b) => {
+    const aTime = new Date(a.createdAt || 0).getTime();
+    const bTime = new Date(b.createdAt || 0).getTime();
+    return aTime - bTime;
+  });
+}
+
+function getFriendRequestUsername(value) {
+  return (
+    value?.username
+    || value?.userName
+    || value?.targetUsername
+    || value?.requesterUsername
+    || value?.receiverUsername
+    || value?.friendUsername
+    || value?.handle
+    || value?.raw?.username
+    || ''
+  );
+}
+
 Text.defaultProps = Text.defaultProps || {};
 Text.defaultProps.style = [{ fontFamily: Platform.OS === 'web' ? 'Pretendard, Arial, sans-serif' : 'Pretendard' }, Text.defaultProps.style];
 TextInput.defaultProps = TextInput.defaultProps || {};
@@ -369,6 +444,7 @@ TextInput.defaultProps.style = [{ fontFamily: Platform.OS === 'web' ? 'Pretendar
 
 export default function App() {
   useHiddenWebScrollbars();
+  const chatSocketRef = useRef(null);
   const [fontsLoaded] = useFonts({
     Pretendard: require('./assets/fonts/Pretendard-Regular.otf'),
     'Pretendard-Bold': require('./assets/fonts/Pretendard-Bold.otf'),
@@ -400,6 +476,7 @@ export default function App() {
   const [chatRooms, setChatRooms] = useState([]);
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
+  const [chatConnection, setChatConnection] = useState({ status: 'disconnected', message: '' });
   const [apiBusy, setApiBusy] = useState(false);
   const visibleSchedules = useMemo(
     () => getVisibleSchedulesByInvitations(schedules, scheduleInvitations),
@@ -466,7 +543,7 @@ export default function App() {
     try {
       return await requester(token);
     } catch (error) {
-      if (![401, 403].includes(error?.status) || !session?.refreshToken) {
+      if (error?.status !== 401 || !session?.refreshToken) {
         throw error;
       }
 
@@ -537,7 +614,7 @@ export default function App() {
         setScheduleInvitations(normalizeScheduleInvitations(invitationResult.value));
       }
       if (roomResult.status === 'fulfilled') {
-        setChatRooms(toArray(roomResult.value));
+        setChatRooms(normalizeChatRooms(roomResult.value));
       }
       if (notificationResult.status === 'fulfilled') {
         setNotifications(toArray(notificationResult.value));
@@ -566,6 +643,12 @@ export default function App() {
     };
   }, [runWithProtectedToken, session?.accessToken, session?.newUser]);
 
+  const refreshChatRooms = useCallback(async () => {
+    if (!session?.accessToken || session.newUser) return;
+    const rooms = await runWithProtectedToken((token) => getChatRooms(token));
+    setChatRooms(normalizeChatRooms(rooms));
+  }, [runWithProtectedToken, session?.accessToken, session?.newUser]);
+
   const refreshNotifications = useCallback(async () => {
     if (!session?.accessToken || session.newUser) return;
     const [notificationResult, unreadResult] = await Promise.allSettled([
@@ -586,6 +669,27 @@ export default function App() {
       refreshFriendData();
     }
   }, [refreshFriendData, screen]);
+
+  useEffect(() => {
+    if (screen === 'chat') {
+      refreshChatRooms().catch((error) => {
+        setApiError(error.message || '채팅방 목록을 불러오지 못했습니다.');
+      });
+    }
+  }, [refreshChatRooms, screen]);
+
+  useEffect(() => {
+    if (screen === 'chatRoom') return undefined;
+    chatSocketRef.current?.deactivate?.();
+    chatSocketRef.current = null;
+    setChatConnection({ status: 'disconnected', message: '' });
+    return undefined;
+  }, [screen]);
+
+  useEffect(() => () => {
+    chatSocketRef.current?.deactivate?.();
+    chatSocketRef.current = null;
+  }, []);
 
   useEffect(() => {
     if (screen === 'notices') {
@@ -1177,9 +1281,70 @@ export default function App() {
     }
 
     setApiError('');
-    const sent = await runWithProtectedToken((token) => sendFriendRequest(targetUsername, token));
-    await refreshFriendData();
-    return sent;
+    const targetKey = normalizeFriendUsername(targetUsername);
+    const findIncomingRequest = (requests) => toArray(requests).find((request) => {
+      const requestUsername = normalizeFriendUsername(getFriendRequestUsername(request));
+      return requestUsername && requestUsername === targetKey;
+    });
+    const findExistingFriend = (items) => toArray(items).find((friend) => {
+      const friendUsername = normalizeFriendUsername(getFriendRequestUsername(friend));
+      return friendUsername && friendUsername === targetKey;
+    });
+
+    const acceptIncomingRequest = async (incomingRequest) => {
+      await runWithProtectedToken((token) => acceptFriendRequest(incomingRequest.friendshipId, token));
+      setFriendRequests((previous) => previous.filter((item) => item.friendshipId !== incomingRequest.friendshipId));
+      await refreshFriendData();
+      return incomingRequest;
+    };
+
+    if (findExistingFriend(friends)) {
+      await refreshFriendData();
+      return findExistingFriend(friends);
+    }
+
+    let incomingRequest = findIncomingRequest(friendRequests);
+    if (!incomingRequest) {
+      const latestRequests = await runWithProtectedToken((token) => getFriendRequests(token));
+      const normalizedRequests = toArray(latestRequests);
+      setFriendRequests(normalizedRequests);
+      incomingRequest = findIncomingRequest(normalizedRequests);
+    }
+
+    if (incomingRequest?.friendshipId) {
+      return acceptIncomingRequest(incomingRequest);
+    }
+
+    try {
+      const sent = await runWithProtectedToken((token) => sendFriendRequest(targetUsername, token));
+      await refreshFriendData();
+      return sent;
+    } catch (error) {
+      if (error?.status !== 403) throw error;
+
+      const [latestFriends, latestRequests] = await Promise.all([
+        runWithProtectedToken((token) => getFriends(token)),
+        runWithProtectedToken((token) => getFriendRequests(token)),
+      ]);
+      const normalizedFriends = toArray(latestFriends);
+      const normalizedRequests = toArray(latestRequests);
+      setFriends(normalizedFriends);
+      setFriendRequests(normalizedRequests);
+      const existingFriend = findExistingFriend(normalizedFriends);
+      if (existingFriend) {
+        await refreshFriendData();
+        return existingFriend;
+      }
+
+      incomingRequest = findIncomingRequest(normalizedRequests);
+
+      if (incomingRequest?.friendshipId) {
+        return acceptIncomingRequest(incomingRequest);
+      }
+
+      error.message = `@${targetUsername}에게 친구 요청을 보낼 수 없습니다. 이미 요청된 상태이거나 상대 계정 정책으로 막혔습니다.`;
+      throw error;
+    }
   };
 
   const handleSearchUsers = async (q) => {
@@ -1234,22 +1399,57 @@ export default function App() {
   };
 
   const handleOpenChatRoom = async (room) => {
+    chatSocketRef.current?.deactivate?.();
+    chatSocketRef.current = null;
     setSelectedRoom(room);
     setChatMessages([]);
+    setChatConnection(room?.id ? { status: 'connecting', message: '' } : { status: 'disconnected', message: '' });
     if (room?.id) {
       try {
         const token = await getProtectedToken();
-        setChatMessages(toArray(await getChatMessages(room.id, token, { size: 50 })));
+        setChatMessages(normalizeChatMessages(await getChatMessages(room.id, token, { size: 50 })));
       } catch (error) {
         setApiError(error.message || '채팅 메시지를 불러오지 못했습니다.');
       }
+      chatSocketRef.current = createChatSocketClient({
+        getAccessToken: getProtectedToken,
+        onMessage: (message) => {
+          setChatMessages((previous) => mergeChatMessages(previous, [message]));
+        },
+        onStatus: (status, message) => {
+          setChatConnection({ status, message: message || '' });
+          if (status === 'error') setApiError(message || '채팅 서버 연결에 실패했습니다.');
+        },
+        roomId: room.id,
+      });
     }
     goTo('chatRoom');
   };
 
   const handleCreateChatRoom = async (body) => {
-    const created = unwrapApiValue(await runWithProtectedToken((token) => createChatRoom(body, token)));
-    setChatRooms((previous) => [created, ...previous]);
+    const createWithFallback = async (token) => {
+      try {
+        return await createChatRoom(body, token);
+      } catch (error) {
+        const fallbackType = body?.type === 'DM' ? 'DIRECT' : body?.type === 'DIRECT' ? 'DM' : null;
+        if (!fallbackType || ![400, 403].includes(error?.status)) {
+          throw error;
+        }
+        return createChatRoom({ ...body, type: fallbackType }, token);
+      }
+    };
+    const created = normalizeChatRoomValue(unwrapApiValue(await runWithProtectedToken(createWithFallback)));
+    try {
+      const rooms = await runWithProtectedToken((token) => getChatRooms(token));
+      setChatRooms(normalizeChatRooms(rooms));
+    } catch {
+      if (created?.id) {
+        setChatRooms((previous) => [
+          created,
+          ...previous.filter((room) => room.id !== created.id),
+        ]);
+      }
+    }
     return created;
   };
 
@@ -1261,17 +1461,21 @@ export default function App() {
     }
 
     setApiError('');
-    const room = await handleCreateChatRoom({
-      type: 'DIRECT',
-      name: friend?.nickname || friend?.name || username,
-      memberUsernames: [username],
-    });
-    await handleOpenChatRoom(room);
+    try {
+      const room = await handleCreateChatRoom({
+        type: 'DIRECT',
+        name: friend?.nickname || friend?.name || username,
+        memberUsernames: [username],
+      });
+      await handleOpenChatRoom(room);
+    } catch (error) {
+      setApiError(error.message || '채팅방을 만들지 못했습니다.');
+    }
   };
 
   const handleReactMessage = async (messageId, emoji) => {
     const token = await getProtectedToken();
-    const updated = await reactToChatMessage(messageId, emoji, token);
+    const updated = normalizeChatMessageValue(unwrapApiValue(await reactToChatMessage(messageId, emoji, token)));
     setChatMessages((previous) => previous.map((message) => (message.id === messageId ? updated : message)));
     return updated;
   };
@@ -1279,12 +1483,24 @@ export default function App() {
   const handleDeleteMessage = async (messageId) => {
     const token = await getProtectedToken();
     await deleteChatMessage(messageId, token);
-    setChatMessages((previous) => previous.filter((message) => message.id !== messageId));
+    setChatMessages((previous) => previous.map((message) => (
+      message.id === messageId ? { ...message, deleted: true, content: '' } : message
+    )));
   };
 
   const handleCreateMediaUpload = async (roomId, contentType) => {
     const token = await getProtectedToken();
-    return getChatMediaUploadUrl(roomId, { contentType }, token);
+    return unwrapApiValue(await getChatMediaUploadUrl(roomId, { contentType }, token));
+  };
+
+  const handleSendChatMessage = async (roomId, content) => {
+    const trimmed = String(content || '').trim();
+    if (!roomId || !trimmed) return null;
+    publishChatMessage(chatSocketRef.current, roomId, {
+      content: trimmed,
+      messageType: 'TEXT',
+    });
+    return true;
   };
 
   const content = useMemo(() => {
@@ -1323,7 +1539,7 @@ export default function App() {
       );
     }
     if (screen === 'chat') return <ChatListScreen apiError={apiError} goTo={goTo} onCreateRoom={handleCreateChatRoom} onOpenRoom={handleOpenChatRoom} rooms={chatRooms} />;
-    if (screen === 'chatRoom') return <ChatRoomScreen goTo={goTo} goBack={goBack} messages={chatMessages} onCreateMediaUpload={handleCreateMediaUpload} onDeleteMessage={handleDeleteMessage} onReactMessage={handleReactMessage} room={selectedRoom} />;
+    if (screen === 'chatRoom') return <ChatRoomScreen chatStatus={chatConnection} goTo={goTo} goBack={goBack} messages={chatMessages} onCreateMediaUpload={handleCreateMediaUpload} onDeleteMessage={handleDeleteMessage} onReactMessage={handleReactMessage} onSendMessage={handleSendChatMessage} room={selectedRoom} />;
     if (screen === 'friends') return <FriendsScreen apiError={apiError} friendRequests={friendRequests} friends={friends} goTo={goTo} onBlockFriend={handleBlockFriend} onDeleteFriend={handleDeleteFriend} onOpenFriend={handleOpenFriendProfile} onRequestAction={handleFriendRequestAction} onSearchUsers={handleSearchUsers} onSendRequest={handleSendFriendRequest} />;
     if (screen === 'studyNote') return <StudyNoteScreen apiError={apiError} goBack={goBack} notes={studyNotes} onCreateNote={handleCreateStudyNote} onSummarizeNote={handleSummarizeStudyNote} schedule={selectedSchedule || visibleSchedules[0]} />;
     if (screen === 'notices') return <NotificationsScreen apiBusy={apiBusy} apiError={apiError} goBack={goBack} invitations={scheduleInvitations} notifications={notifications} onInvitationAction={handleScheduleInvitationAction} onMarkAllRead={handleMarkAllNotificationsRead} onMarkRead={handleMarkNotificationRead} />;
@@ -1377,7 +1593,7 @@ export default function App() {
         }}
       />
     );
-  }, [screen, history, session, plan, authError, authNotice, authBusy, apiError, schedules, visibleSchedules, friends, friendRequests, scheduleInvitations, notifications, pendingInvitationCount, parsedSchedule, parsedScheduleInput, selectedFriend, selectedSchedule, studyNotes, chatRooms, selectedRoom, chatMessages, apiBusy, fontsLoaded, runWithProtectedToken, userSettings, adminData, apiDiagnostics]);
+  }, [screen, history, session, plan, authError, authNotice, authBusy, apiError, schedules, visibleSchedules, friends, friendRequests, scheduleInvitations, notifications, pendingInvitationCount, parsedSchedule, parsedScheduleInput, selectedFriend, selectedSchedule, studyNotes, chatRooms, selectedRoom, chatMessages, chatConnection, apiBusy, fontsLoaded, runWithProtectedToken, userSettings, adminData, apiDiagnostics]);
 
   const isAuthenticated = Boolean(session?.accessToken && !session?.newUser && !['intro', 'login', 'kakaoConsent', 'onboardingSetup'].includes(screen));
 

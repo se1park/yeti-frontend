@@ -12,6 +12,7 @@
     "desktop:dev": "cross-env ELECTRON_START_URL=http://localhost:8081 electron electron/main.js"
   },
   "dependencies": {
+    "@stomp/stompjs": "^7.3.0",
     "expo": "~54.0.33",
     "expo-auth-session": "~7.0.11",
     "expo-crypto": "~15.0.9",
@@ -23,7 +24,8 @@
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
     "react-native-svg": "15.12.1",
-    "react-native-web": "^0.21.0"
+    "react-native-web": "^0.21.0",
+    "sockjs-client": "^1.6.1"
   },
   "private": true,
   "devDependencies": {
