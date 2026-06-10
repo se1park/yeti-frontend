@@ -406,17 +406,18 @@ function normalizeChatRoomValue(room, index = 0) {
     || room.recipientUsername
     || room.otherUsername
     || (!isGenericChatRoomName(room.title) ? room.title : '')
-    || '채팅방';
+    || '';
+  const displayName = !isGenericChatRoomName(room.displayName)
+    ? room.displayName
+    : !isGenericChatRoomName(room.name)
+      ? room.name
+      : fallbackName;
   return {
     ...room,
     id: id || `${room.name || 'room'}-${index}`,
-    displayName: !isGenericChatRoomName(room.displayName)
-      ? room.displayName
-      : !isGenericChatRoomName(room.name)
-        ? room.name
-        : fallbackName,
+    displayName,
     memberCount,
-    name: room.name || fallbackName,
+    name: !isGenericChatRoomName(room.name) ? room.name : fallbackName,
     thumbnailUrl: room.thumbnailUrl || room.thumbnailURL || room.imageUrl || '',
     type: room.type || 'DM',
     unreadCount: Number(room.unreadCount ?? room.unread_count ?? room.unread ?? 0),

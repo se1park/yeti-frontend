@@ -67,7 +67,7 @@ function getPeerName(peer) {
 
 function getAvatarLabel(value) {
   const normalized = String(value || '').trim().replace(/^@/, '');
-  return (normalized || '채팅').slice(0, 2).toLowerCase();
+  return normalized.slice(0, 2).toLowerCase();
 }
 
 function normalizeRoom(room, index, currentUser) {
@@ -76,15 +76,16 @@ function normalizeRoom(room, index, currentUser) {
   const serverName = !isGenericChatRoomName(room.name) ? room.name : '';
   const directTitle = room.directUsername || room.friendUsername || peerName;
   const displayName = !isGenericChatRoomName(room.displayName) ? room.displayName : '';
-  const title = directTitle || displayName || room.directNickname || serverName || '채팅방';
+  const title = directTitle || room.directNickname || displayName || serverName || room.type || '';
   const username = room.directUsername || room.friendUsername || room.peerUsername || room.targetUsername || room.recipientUsername || room.otherUsername || peer?.username || peer?.userName || '';
+  const avatarLabel = getAvatarLabel(username || title || room.type || 'dm');
   return {
     id: room.id || `${room.name}-${index}`,
     title,
     preview: username ? `@${username}` : `${room.type || 'CHAT'} · 멤버 ${room.memberCount || 0}명`,
     time: room.createdAt ? new Date(room.createdAt).toLocaleDateString() : '',
     unread: room.unreadCount ? String(room.unreadCount) : '',
-    avatars: [getAvatarLabel(username || title)],
+    avatars: avatarLabel ? [avatarLabel] : [],
     chip: room.type,
     raw: room,
   };
@@ -177,7 +178,7 @@ export function ChatRoomScreen({ chatStatus, currentUser, goTo, goBack, messages
   const [draft, setDraft] = useState('');
   const peer = getPeerFromRoom(room, currentUser);
   const peerName = getPeerName(peer);
-  const roomTitle = room?.directUsername || peer?.username || peer?.userName || peerName || (!isGenericChatRoomName(room?.displayName) ? room?.displayName : '') || room?.directNickname || (!isGenericChatRoomName(room?.name) ? room?.name : '') || '채팅방';
+  const roomTitle = room?.directUsername || peer?.username || peer?.userName || peerName || room?.directNickname || (!isGenericChatRoomName(room?.displayName) ? room?.displayName : '') || (!isGenericChatRoomName(room?.name) ? room?.name : '') || room?.type || '';
   const roomSubtitle = room?.directUsername || peer?.username ? `@${room.directUsername || peer.username}` : room?.type || '';
   const connected = chatStatus?.status === 'connected';
   const statusLabel = {

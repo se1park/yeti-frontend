@@ -16,6 +16,28 @@ function getUsername(user) {
   return user.username || user.userName || user.preferred_username || user.handle || getEmailName(user.email) || user.userId || user.id || user.sub || 'user';
 }
 
+function isGenericChatRoomName(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return !normalized
+    || ['채팅방', '채팅창', 'chat', 'chatroom', 'chat room', 'direct', 'dm', '대화방'].includes(normalized);
+}
+
+function getRoomDisplayName(room) {
+  return room?.directUsername
+    || room?.peerUsername
+    || room?.friendUsername
+    || room?.targetUsername
+    || room?.recipientUsername
+    || room?.otherUsername
+    || room?.directNickname
+    || room?.peerNickname
+    || room?.friendNickname
+    || (!isGenericChatRoomName(room?.displayName) ? room.displayName : '')
+    || (!isGenericChatRoomName(room?.name) ? room.name : '')
+    || room?.type
+    || '';
+}
+
 export function ProfileEditScreen({ goBack, session }) {
   const user = session?.user || {};
   const displayName = getDisplayName(user);
@@ -330,16 +352,17 @@ export function ScheduleEditScreen({ apiBusy, apiError, goBack, onCreate, onSave
 }
 
 export function ChatSettingsScreen({ goBack, room }) {
-  const roomName = room?.name || '선택된 채팅방';
+  const roomName = getRoomDisplayName(room);
   const roomType = room?.type || '';
   const memberCount = room?.memberCount ?? 0;
+  const avatarLabel = (roomName || roomType || 'dm').slice(0, 2);
 
   return (
     <Screen left="‹" onBack={goBack} title="채팅방 설정">
       <View style={styles.profileCenter}>
-        <Avatar label={roomName.slice(0, 1)} color={BLUE} size={66} />
-        <Text style={styles.profileName}>{roomName}</Text>
-        <Text style={styles.profileMeta}>{roomType || '채팅방'} · 멤버 {memberCount}명</Text>
+        <Avatar label={avatarLabel} color={BLUE} size={66} />
+        <Text style={styles.profileName}>{roomName || roomType}</Text>
+        <Text style={styles.profileMeta}>{roomType || '-'} · 멤버 {memberCount}명</Text>
       </View>
       <Text style={styles.section}>채팅방 정보</Text>
       <Card style={styles.formCard}>
@@ -354,7 +377,8 @@ export function ChatSettingsScreen({ goBack, room }) {
 }
 
 export function ChatSearchScreen({ goBack, messages = [], room }) {
-  const keyword = room?.name || '채팅';
+  const roomName = getRoomDisplayName(room);
+  const keyword = roomName || room?.type || '';
   const displayMessages = (messages || []).filter((message) => !message.deleted).slice(0, 10);
 
   return (
@@ -363,7 +387,7 @@ export function ChatSearchScreen({ goBack, messages = [], room }) {
         {[`검색어 ${keyword}`, `메시지 ${displayMessages.length}`].map((item, index) => <Pill key={item} tone={index === 0 ? 'gray' : 'blue'}>{item}</Pill>)}
       </View>
       <Text style={styles.section}>채팅방</Text>
-      <Card style={styles.formCard}><InfoRow label={room?.name || '선택된 채팅방 없음'} value={room?.type || ''} /></Card>
+      <Card style={styles.formCard}><InfoRow label={roomName || room?.type || '-'} value={room?.type || ''} /></Card>
       <Text style={styles.section}>메시지 {displayMessages.length}개</Text>
       <Card style={styles.formCard}>
         {displayMessages.length ? displayMessages.map((message) => (
