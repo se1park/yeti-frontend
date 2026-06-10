@@ -49,6 +49,7 @@ import {
   getStudyNotes,
   getUnreadNotificationCount,
   getUserSettings,
+  leaveChatRoom,
   markAllNotificationsRead,
   markNotificationRead,
   parseSchedule,
@@ -1616,6 +1617,19 @@ export default function App() {
     )));
   };
 
+  const handleLeaveChatRoom = async (roomId) => {
+    if (!roomId) throw new Error('나갈 채팅방을 찾을 수 없습니다.');
+    const token = await getProtectedToken();
+    await leaveChatRoom(roomId, token);
+    chatSocketRef.current?.deactivate?.();
+    chatSocketRef.current = null;
+    setChatRooms((previous) => previous.filter((room) => room.id !== roomId));
+    setSelectedRoom(null);
+    setChatMessages([]);
+    setChatConnection({ status: 'disconnected', message: '' });
+    switchTab('chat');
+  };
+
   const handleCreateMediaUpload = async (roomId, contentType) => {
     const token = await getProtectedToken();
     return unwrapApiValue(await getChatMediaUploadUrl(roomId, { contentType }, token));
@@ -1667,7 +1681,7 @@ export default function App() {
       );
     }
     if (screen === 'chat') return <ChatListScreen apiError={apiError} currentUser={session?.user} goTo={goTo} onCreateRoom={handleCreateChatRoom} onOpenRoom={handleOpenChatRoom} rooms={chatRooms} />;
-    if (screen === 'chatRoom') return <ChatRoomScreen chatStatus={chatConnection} currentUser={session?.user} goTo={goTo} goBack={goBack} messages={chatMessages} onCreateMediaUpload={handleCreateMediaUpload} onDeleteMessage={handleDeleteMessage} onReactMessage={handleReactMessage} onSendMessage={handleSendChatMessage} room={selectedRoom} />;
+    if (screen === 'chatRoom') return <ChatRoomScreen chatStatus={chatConnection} currentUser={session?.user} goTo={goTo} goBack={goBack} messages={chatMessages} onCreateMediaUpload={handleCreateMediaUpload} onDeleteMessage={handleDeleteMessage} onLeaveRoom={handleLeaveChatRoom} onReactMessage={handleReactMessage} onSendMessage={handleSendChatMessage} room={selectedRoom} />;
     if (screen === 'friends') return <FriendsScreen apiError={apiError} friendRequests={friendRequests} friends={friends} goTo={goTo} onBlockFriend={handleBlockFriend} onDeleteFriend={handleDeleteFriend} onOpenFriend={handleOpenFriendProfile} onRequestAction={handleFriendRequestAction} onSearchUsers={handleSearchUsers} onSendRequest={handleSendFriendRequest} />;
     if (screen === 'studyNote') return <StudyNoteScreen apiError={apiError} goBack={goBack} notes={studyNotes} onCreateNote={handleCreateStudyNote} onSummarizeNote={handleSummarizeStudyNote} schedule={selectedSchedule || visibleSchedules[0]} />;
     if (screen === 'notices') return <NotificationsScreen apiBusy={apiBusy} apiError={apiError} goBack={goBack} invitations={scheduleInvitations} notifications={notifications} onInvitationAction={handleScheduleInvitationAction} onMarkAllRead={handleMarkAllNotificationsRead} onMarkRead={handleMarkNotificationRead} />;

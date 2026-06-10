@@ -221,6 +221,13 @@ export function deleteChatMessage(messageId, token) {
   });
 }
 
+export function leaveChatRoom(roomId, token) {
+  return request(`/api/chat/rooms/${roomId}/leave`, {
+    method: 'DELETE',
+    token,
+  });
+}
+
 export function searchUsers(q, token) {
   return request('/api/users/search', {
     method: 'GET',

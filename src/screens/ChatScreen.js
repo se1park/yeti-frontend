@@ -172,7 +172,7 @@ export function ChatListScreen({ apiError, currentUser, goTo, onCreateRoom, onOp
   );
 }
 
-export function ChatRoomScreen({ chatStatus, currentUser, goTo, goBack, messages, onCreateMediaUpload, onDeleteMessage, onReactMessage, onSendMessage, room }) {
+export function ChatRoomScreen({ chatStatus, currentUser, goTo, goBack, messages, onCreateMediaUpload, onDeleteMessage, onLeaveRoom, onReactMessage, onSendMessage, room }) {
   const [notice, setNotice] = useState('');
   const [draft, setDraft] = useState('');
   const peer = getPeerFromRoom(room, currentUser);
@@ -207,6 +207,15 @@ export function ChatRoomScreen({ chatStatus, currentUser, goTo, goBack, messages
     }
   };
 
+  const leave = async () => {
+    if (!room?.id) return;
+    try {
+      await onLeaveRoom?.(room.id);
+    } catch (error) {
+      setNotice(error.message || '채팅방을 나가지 못했습니다.');
+    }
+  };
+
   return (
     <Screen
       left="‹"
@@ -232,10 +241,15 @@ export function ChatRoomScreen({ chatStatus, currentUser, goTo, goBack, messages
         </View>
       )}
     >
-      <View style={styles.statusRow}>
-        <Text style={[styles.statusDot, connected && styles.statusDotConnected]}>●</Text>
-        <Text style={styles.statusText}>{statusLabel}</Text>
-        {chatStatus?.message ? <Text numberOfLines={1} style={styles.statusMessage}>{chatStatus.message}</Text> : null}
+      <View style={styles.roomToolbar}>
+        <View style={styles.statusRow}>
+          <Text style={[styles.statusDot, connected && styles.statusDotConnected]}>●</Text>
+          <Text style={styles.statusText}>{statusLabel}</Text>
+          {chatStatus?.message ? <Text numberOfLines={1} style={styles.statusMessage}>{chatStatus.message}</Text> : null}
+        </View>
+        <Pressable onPress={leave} style={styles.leaveButton}>
+          <Text style={styles.leaveButtonText}>나가기</Text>
+        </Pressable>
       </View>
       {notice ? <Text style={styles.errorText}>{notice}</Text> : null}
       {(messages || []).length ? messages.map((item) => {
@@ -427,10 +441,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '900',
   },
+  leaveButton: {
+    alignItems: 'center',
+    backgroundColor: '#fff1f2',
+    borderColor: '#fecdd3',
+    borderRadius: 8,
+    borderWidth: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  leaveButtonText: { color: '#f04454', fontSize: 12, fontWeight: '900' },
+  roomToolbar: { alignItems: 'center', flexDirection: 'row', gap: 10, justifyContent: 'space-between', marginBottom: 10 },
   statusDot: { color: '#f04454', fontSize: 11, fontWeight: '900' },
   statusDotConnected: { color: '#12b76a' },
   statusMessage: { color: '#f04454', flex: 1, fontSize: 11, fontWeight: '800' },
-  statusRow: { alignItems: 'center', flexDirection: 'row', gap: 6, marginBottom: 10 },
+  statusRow: { alignItems: 'center', flex: 1, flexDirection: 'row', gap: 6 },
   statusText: { color: MUTED, fontSize: 12, fontWeight: '900' },
   modalBackdrop: { alignItems: Platform.OS === 'web' ? 'center' : 'stretch', backgroundColor: 'rgba(17, 24, 39, 0.48)', flex: 1, justifyContent: Platform.OS === 'web' ? 'center' : 'flex-end', padding: Platform.OS === 'web' ? 24 : 0 },
   sheet: { backgroundColor: '#ffffff', borderRadius: Platform.OS === 'web' ? 18 : 0, borderTopLeftRadius: 18, borderTopRightRadius: 18, maxWidth: Platform.OS === 'web' ? 460 : undefined, padding: 18, paddingBottom: 30, width: '100%' },
