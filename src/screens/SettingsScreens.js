@@ -34,7 +34,6 @@ function getRoomDisplayName(room) {
     || room?.friendNickname
     || (!isGenericChatRoomName(room?.displayName) ? room.displayName : '')
     || (!isGenericChatRoomName(room?.name) ? room.name : '')
-    || room?.type
     || '';
 }
 
@@ -355,13 +354,13 @@ export function ChatSettingsScreen({ goBack, room }) {
   const roomName = getRoomDisplayName(room);
   const roomType = room?.type || '';
   const memberCount = room?.memberCount ?? 0;
-  const avatarLabel = (roomName || roomType || 'dm').slice(0, 2);
+  const avatarLabel = roomName.slice(0, 2);
 
   return (
     <Screen left="‹" onBack={goBack} title="채팅방 설정">
       <View style={styles.profileCenter}>
         <Avatar label={avatarLabel} color={BLUE} size={66} />
-        <Text style={styles.profileName}>{roomName || roomType}</Text>
+        <Text style={styles.profileName}>{roomName || '-'}</Text>
         <Text style={styles.profileMeta}>{roomType || '-'} · 멤버 {memberCount}명</Text>
       </View>
       <Text style={styles.section}>채팅방 정보</Text>
@@ -378,7 +377,7 @@ export function ChatSettingsScreen({ goBack, room }) {
 
 export function ChatSearchScreen({ goBack, messages = [], room }) {
   const roomName = getRoomDisplayName(room);
-  const keyword = roomName || room?.type || '';
+  const keyword = roomName;
   const displayMessages = (messages || []).filter((message) => !message.deleted).slice(0, 10);
 
   return (
@@ -387,7 +386,7 @@ export function ChatSearchScreen({ goBack, messages = [], room }) {
         {[`검색어 ${keyword}`, `메시지 ${displayMessages.length}`].map((item, index) => <Pill key={item} tone={index === 0 ? 'gray' : 'blue'}>{item}</Pill>)}
       </View>
       <Text style={styles.section}>채팅방</Text>
-      <Card style={styles.formCard}><InfoRow label={roomName || room?.type || '-'} value={room?.type || ''} /></Card>
+      <Card style={styles.formCard}><InfoRow label={roomName || '-'} value={room?.type || ''} /></Card>
       <Text style={styles.section}>메시지 {displayMessages.length}개</Text>
       <Card style={styles.formCard}>
         {displayMessages.length ? displayMessages.map((message) => (

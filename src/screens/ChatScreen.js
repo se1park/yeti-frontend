@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Plus, Search } from 'lucide-react-native';
-import { Avatar, Card, Pill, PrimaryButton, Screen } from '../components/ui';
+import { Avatar, Card, PrimaryButton, Screen } from '../components/ui';
 import { BLUE, INK, LINE, MUTED } from '../data/yetiData';
 
 function userKeys(user) {
@@ -76,17 +76,17 @@ function normalizeRoom(room, index, currentUser) {
   const serverName = !isGenericChatRoomName(room.name) ? room.name : '';
   const directTitle = room.directUsername || room.friendUsername || peerName;
   const displayName = !isGenericChatRoomName(room.displayName) ? room.displayName : '';
-  const title = directTitle || room.directNickname || displayName || serverName || room.type || '';
+  const title = directTitle || room.directNickname || displayName || serverName || '';
   const username = room.directUsername || room.friendUsername || room.peerUsername || room.targetUsername || room.recipientUsername || room.otherUsername || peer?.username || peer?.userName || '';
-  const avatarLabel = getAvatarLabel(username || title || room.type || 'dm');
+  const avatarLabel = getAvatarLabel(username || title);
   return {
     id: room.id || `${room.name}-${index}`,
     title,
-    preview: username ? `@${username}` : `${room.type || 'CHAT'} · 멤버 ${room.memberCount || 0}명`,
+    preview: username ? `@${username}` : `멤버 ${room.memberCount || 0}명`,
     time: room.createdAt ? new Date(room.createdAt).toLocaleDateString() : '',
     unread: room.unreadCount ? String(room.unreadCount) : '',
     avatars: avatarLabel ? [avatarLabel] : [],
-    chip: room.type,
+    chip: '',
     raw: room,
   };
 }
@@ -134,7 +134,6 @@ export function ChatListScreen({ apiError, currentUser, goTo, onCreateRoom, onOp
                   <View style={styles.roomText}>
                     <View style={styles.roomTitleRow}>
                       <Text style={styles.roomTitle}>{room.title}</Text>
-                      {room.chip ? <Pill tone="yellow">{room.chip}</Pill> : null}
                     </View>
                     <Text numberOfLines={1} style={styles.preview}>{room.preview}</Text>
                   </View>
@@ -178,8 +177,8 @@ export function ChatRoomScreen({ chatStatus, currentUser, goTo, goBack, messages
   const [draft, setDraft] = useState('');
   const peer = getPeerFromRoom(room, currentUser);
   const peerName = getPeerName(peer);
-  const roomTitle = room?.directUsername || peer?.username || peer?.userName || peerName || room?.directNickname || (!isGenericChatRoomName(room?.displayName) ? room?.displayName : '') || (!isGenericChatRoomName(room?.name) ? room?.name : '') || room?.type || '';
-  const roomSubtitle = room?.directUsername || peer?.username ? `@${room.directUsername || peer.username}` : room?.type || '';
+  const roomTitle = room?.directUsername || peer?.username || peer?.userName || peerName || room?.directNickname || (!isGenericChatRoomName(room?.displayName) ? room?.displayName : '') || (!isGenericChatRoomName(room?.name) ? room?.name : '') || '';
+  const roomSubtitle = room?.directUsername || peer?.username ? `@${room.directUsername || peer.username}` : '';
   const connected = chatStatus?.status === 'connected';
   const statusLabel = {
     connected: '실시간 연결됨',
