@@ -499,6 +499,33 @@ function normalizeChatRooms(value, friendList = [], currentUser = {}) {
   return toArray(value).map((room) => enrichChatRoomWithFriends(room, friendList, currentUser)).filter(Boolean);
 }
 
+function hasChatRoomIdentity(room) {
+  return Boolean(
+    room?.directUsername
+    || room?.directNickname
+    || (!isGenericChatRoomName(room?.displayName) && room?.displayName)
+    || (!isGenericChatRoomName(room?.name) && room?.name)
+  );
+}
+
+function mergeChatRoomIdentity(previousRooms = [], nextRooms = []) {
+  const previousById = new Map(previousRooms.filter((room) => room?.id).map((room) => [room.id, room]));
+  return nextRooms.map((room) => {
+    const previous = previousById.get(room?.id);
+    if (!previous || hasChatRoomIdentity(room) || !hasChatRoomIdentity(previous)) return room;
+    return {
+      ...room,
+      directNickname: previous.directNickname || room.directNickname,
+      directProfileImageUrl: previous.directProfileImageUrl || room.directProfileImageUrl,
+      directUsername: previous.directUsername || room.directUsername,
+      displayName: previous.displayName || room.displayName,
+      friend: previous.friend || room.friend,
+      name: !isGenericChatRoomName(previous.name) ? previous.name : room.name,
+      peer: previous.peer || room.peer,
+    };
+  });
+}
+
 function normalizeChatMessageValue(message, index = 0) {
   if (!message || typeof message !== 'object') return null;
   const id = message.id || message.messageId || message.uuid;
@@ -724,7 +751,8 @@ export default function App() {
         const normalizedFriends = toArray(friendResult.value);
         setFriends(normalizedFriends);
         if (roomResult.status === 'fulfilled') {
-          setChatRooms(normalizeChatRooms(roomResult.value, normalizedFriends, session?.user));
+          const normalizedRooms = normalizeChatRooms(roomResult.value, normalizedFriends, session?.user);
+          setChatRooms((previous) => mergeChatRoomIdentity(previous, normalizedRooms));
         }
       }
       if (requestResult.status === 'fulfilled') {
@@ -734,7 +762,8 @@ export default function App() {
         setScheduleInvitations(normalizeScheduleInvitations(invitationResult.value));
       }
       if (roomResult.status === 'fulfilled' && friendResult.status !== 'fulfilled') {
-        setChatRooms(normalizeChatRooms(roomResult.value, friends, session?.user));
+        const normalizedRooms = normalizeChatRooms(roomResult.value, friends, session?.user);
+        setChatRooms((previous) => mergeChatRoomIdentity(previous, normalizedRooms));
       }
       if (notificationResult.status === 'fulfilled') {
         setNotifications(toArray(notificationResult.value));
@@ -766,7 +795,8 @@ export default function App() {
   const refreshChatRooms = useCallback(async () => {
     if (!session?.accessToken || session.newUser) return;
     const rooms = await runWithProtectedToken((token) => getChatRooms(token));
-    setChatRooms(normalizeChatRooms(rooms, friends, session?.user));
+    const normalizedRooms = normalizeChatRooms(rooms, friends, session?.user);
+    setChatRooms((previous) => mergeChatRoomIdentity(previous, normalizedRooms));
   }, [friends, runWithProtectedToken, session?.accessToken, session?.newUser, session?.user]);
 
   const refreshNotifications = useCallback(async () => {
@@ -1565,12 +1595,12 @@ export default function App() {
       const rooms = await runWithProtectedToken((token) => getChatRooms(token));
       const normalizedRooms = normalizeChatRooms(rooms, friends, session?.user);
       if (created?.id) {
-        setChatRooms([
+        setChatRooms((previous) => mergeChatRoomIdentity(previous, [
           created,
           ...normalizedRooms.filter((room) => room.id !== created.id),
-        ]);
+        ]));
       } else {
-        setChatRooms(normalizedRooms);
+        setChatRooms((previous) => mergeChatRoomIdentity(previous, normalizedRooms));
       }
     } catch {
       if (created?.id) {
