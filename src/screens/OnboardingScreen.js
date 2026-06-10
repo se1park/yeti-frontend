@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import { PrimaryButton, SecondaryButton } from '../components/ui';
@@ -111,11 +111,8 @@ export function LoginScreen({ busy, error, notice, onEmailLogin, onOAuth, onSign
   const googleConfig = useMemo(() => ({
     clientId: googleClientId || 'missing-google-client-id',
     redirectUri: googleRedirectUri,
-    responseType: AuthSession.ResponseType.IdToken,
+    responseType: AuthSession.ResponseType.Token,
     scopes: ['openid', 'profile', 'email'],
-    extraParams: {
-      nonce: `yeti-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    },
     usePKCE: false,
   }), []);
   const kakaoConfig = useMemo(() => ({
@@ -141,7 +138,7 @@ export function LoginScreen({ busy, error, notice, onEmailLogin, onOAuth, onSign
   useEffect(() => {
     if (!googleResponse) return;
 
-    const googleToken = googleResponse.params?.id_token;
+    const googleToken = googleResponse.params?.access_token || googleResponse.authentication?.accessToken;
 
     if (googleResponse.type === 'success' && googleToken) {
       onOAuth('google', googleToken);
@@ -149,7 +146,7 @@ export function LoginScreen({ busy, error, notice, onEmailLogin, onOAuth, onSign
     }
 
     if (googleResponse.type === 'success' && !googleToken) {
-      setSocialError('Google ID 토큰을 받지 못했습니다. OAuth 클라이언트 설정을 확인해주세요.');
+      setSocialError('Google OAuth 토큰을 받지 못했습니다. OAuth 클라이언트 설정을 확인해주세요.');
       return;
     }
 
@@ -347,9 +344,12 @@ const styles = StyleSheet.create({
   },
   introCenter: {
     alignItems: 'center',
+    alignSelf: 'center',
     flex: 1,
     justifyContent: 'center',
+    maxWidth: Platform.OS === 'web' ? 420 : undefined,
     paddingTop: 28,
+    width: '100%',
   },
   logo: {
     alignItems: 'center',
@@ -380,9 +380,12 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   bottomArea: {
+    alignSelf: 'center',
     gap: 12,
+    maxWidth: Platform.OS === 'web' ? 420 : undefined,
     paddingBottom: 18,
     paddingHorizontal: 24,
+    width: '100%',
   },
   introCopy: {
     color: '#667085',
@@ -404,8 +407,11 @@ const styles = StyleSheet.create({
   },
   loginCenterCompact: {
     alignItems: 'center',
+    alignSelf: 'center',
     justifyContent: 'center',
+    maxWidth: Platform.OS === 'web' ? 420 : undefined,
     paddingTop: 44,
+    width: '100%',
   },
   loginBrand: {
     color: INK,
@@ -420,9 +426,12 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   loginActions: {
+    alignSelf: 'center',
     gap: 10,
+    maxWidth: Platform.OS === 'web' ? 420 : undefined,
     paddingBottom: 28,
     paddingHorizontal: 24,
+    width: '100%',
   },
   modeTabs: {
     backgroundColor: '#f0f2f5',

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { MessageCircle, Plus, Search } from 'lucide-react-native';
 import { Avatar, Card, PrimaryButton, Screen, SecondaryButton, SectionTitle } from '../components/ui';
 import { BLUE, INK, LINE, MUTED } from '../data/yetiData';
@@ -25,7 +25,7 @@ function normalizeFriend(item, index) {
   };
 }
 
-export function FriendsScreen({ apiError, friendRequests, friends, goTo, onBlockFriend, onDeleteFriend, onOpenFriend, onRequestAction, onSendRequest }) {
+export function FriendsScreen({ apiError, friendRequests, friends, goTo, onBlockFriend, onDeleteFriend, onOpenFriend, onRequestAction, onSearchUsers, onSendRequest }) {
   const [addVisible, setAddVisible] = useState(false);
   const requests = (friendRequests?.length ? friendRequests : []).map(normalizeFriend);
   const displayFriends = (friends || []).map(normalizeFriend);
@@ -40,68 +40,90 @@ export function FriendsScreen({ apiError, friendRequests, friends, goTo, onBlock
           </View>
           <Text style={styles.qrBadge}>QR</Text>
         </View>
-        <SectionTitle right="모두 보기 ›">받은 요청 <Text style={styles.countBadge}>{requests.length}</Text></SectionTitle>
-        {apiError ? <Text style={styles.errorText}>{apiError}</Text> : null}
-        {requests.length ? (
-          requests.map((request, index) => (
-            <Card key={request.friendshipId} style={styles.request}>
-              <View style={styles.requestInfo}>
-                <Avatar label={request.initial} color={index ? '#06b6d4' : '#c026d3'} />
-                <View style={styles.text}>
-                  <Text style={styles.name}>{request.name}</Text>
-                  <Text numberOfLines={1} style={styles.meta}>{[request.handle, request.message].filter(Boolean).join(' · ')}</Text>
-                </View>
-              </View>
-              <View style={styles.requestActions}>
-                <SecondaryButton onPress={() => onRequestAction?.(request.friendshipId, 'reject')} style={styles.smallButton}>
-                  <Text numberOfLines={1} style={styles.rejectText}>거절</Text>
-                </SecondaryButton>
-                <PrimaryButton onPress={() => onRequestAction?.(request.friendshipId, 'accept')} style={styles.smallButton}>
-                  <Text numberOfLines={1} style={styles.acceptText}>수락</Text>
-                </PrimaryButton>
-              </View>
-            </Card>
-          ))
-        ) : (
-          <Card style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>받은 친구 요청이 없습니다</Text>
-            <Text style={styles.emptyText}>새 요청이 오면 여기에서 수락하거나 거절할 수 있어요.</Text>
-          </Card>
-        )}
-        <SectionTitle right="이름순⌄">친구 {displayFriends.length}</SectionTitle>
-        {displayFriends.length ? (
-          displayFriends.map((friend, index) => (
-            <Pressable key={friend.friendshipId} onPress={() => onOpenFriend?.(friend.raw || friend)}>
-              <Card style={styles.friend}>
-              <Avatar label={friend.initial} color={['#a855f7', BLUE, '#0fbf73', '#fb923c', '#f04454'][index % 5]} />
-              <View style={styles.text}>
-                <Text style={styles.name}>{friend.name} <Text style={styles.handle}>{friend.handle}</Text></Text>
-                <Text style={styles.meta}>{friend.message}</Text>
-              </View>
-              <View style={styles.chatCircle}>
-                <MessageCircle color={BLUE} size={15} strokeWidth={2.4} />
-              </View>
-              <Text onPress={() => onDeleteFriend?.(friend.friendshipId)} style={styles.friendAction}>삭제</Text>
-              <Text onPress={() => onBlockFriend?.(friend.friendshipId)} style={styles.blockAction}>차단</Text>
+        <View style={styles.webGrid}>
+          <View style={styles.webPanel}>
+            <SectionTitle right="모두 보기 ›">받은 요청 <Text style={styles.countBadge}>{requests.length}</Text></SectionTitle>
+            {apiError ? <Text style={styles.errorText}>{apiError}</Text> : null}
+            {requests.length ? (
+              requests.map((request, index) => (
+                <Card key={request.friendshipId} style={styles.request}>
+                  <View style={styles.requestInfo}>
+                    <Avatar label={request.initial} color={index ? '#06b6d4' : '#c026d3'} />
+                    <View style={styles.text}>
+                      <Text style={styles.name}>{request.name}</Text>
+                      <Text numberOfLines={1} style={styles.meta}>{[request.handle, request.message].filter(Boolean).join(' · ')}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.requestActions}>
+                    <SecondaryButton onPress={() => onRequestAction?.(request.friendshipId, 'reject')} style={styles.smallButton}>
+                      <Text numberOfLines={1} style={styles.rejectText}>거절</Text>
+                    </SecondaryButton>
+                    <PrimaryButton onPress={() => onRequestAction?.(request.friendshipId, 'accept')} style={styles.smallButton}>
+                      <Text numberOfLines={1} style={styles.acceptText}>수락</Text>
+                    </PrimaryButton>
+                  </View>
+                </Card>
+              ))
+            ) : (
+              <Card style={styles.emptyCard}>
+                <Text style={styles.emptyTitle}>받은 친구 요청이 없습니다</Text>
+                <Text style={styles.emptyText}>새 요청이 오면 여기에서 수락하거나 거절할 수 있어요.</Text>
               </Card>
-            </Pressable>
-          ))
-        ) : (
-          <Card style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>친구가 없습니다</Text>
-            <Text style={styles.emptyText}>친구 추가 버튼으로 username을 입력해 요청을 보내세요.</Text>
-          </Card>
-        )}
+            )}
+          </View>
+
+          <View style={[styles.webPanel, styles.friendPanel]}>
+            <SectionTitle right="이름순⌄">친구 {displayFriends.length}</SectionTitle>
+            {displayFriends.length ? (
+              displayFriends.map((friend, index) => (
+                <Pressable key={friend.friendshipId} onPress={() => onOpenFriend?.(friend.raw || friend)}>
+                  <Card style={styles.friend}>
+                    <Avatar label={friend.initial} color={['#a855f7', BLUE, '#0fbf73', '#fb923c', '#f04454'][index % 5]} />
+                    <View style={styles.text}>
+                      <Text style={styles.name}>{friend.name} <Text style={styles.handle}>{friend.handle}</Text></Text>
+                      <Text style={styles.meta}>{friend.message}</Text>
+                    </View>
+                    <View style={styles.chatCircle}>
+                      <MessageCircle color={BLUE} size={15} strokeWidth={2.4} />
+                    </View>
+                    <Text onPress={() => onDeleteFriend?.(friend.friendshipId)} style={styles.friendAction}>삭제</Text>
+                    <Text onPress={() => onBlockFriend?.(friend.friendshipId)} style={styles.blockAction}>차단</Text>
+                  </Card>
+                </Pressable>
+              ))
+            ) : (
+              <Card style={styles.emptyCard}>
+                <Text style={styles.emptyTitle}>친구가 없습니다</Text>
+                <Text style={styles.emptyText}>친구 추가 버튼으로 username을 입력해 요청을 보내세요.</Text>
+              </Card>
+            )}
+          </View>
+        </View>
       </Screen>
-      <FriendAddSheet onSendRequest={onSendRequest} visible={addVisible} onClose={() => setAddVisible(false)} />
+      <FriendAddSheet onSearchUsers={onSearchUsers} onSendRequest={onSendRequest} visible={addVisible} onClose={() => setAddVisible(false)} />
     </View>
   );
 }
 
-function FriendAddSheet({ visible, onClose, onSendRequest }) {
+function FriendAddSheet({ visible, onClose, onSearchUsers, onSendRequest }) {
   const [username, setUsername] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [results, setResults] = useState([]);
+
+  const search = async (value) => {
+    setUsername(value);
+    const q = value.trim().replace(/^@/, '');
+    if (q.length < 2) {
+      setResults([]);
+      return;
+    }
+    try {
+      setResults(await onSearchUsers?.(q) || []);
+    } catch {
+      setResults([]);
+    }
+  };
 
   const submit = async () => {
     if (!username.trim()) {
@@ -138,12 +160,29 @@ function FriendAddSheet({ visible, onClose, onSendRequest }) {
           <Text style={styles.sheetSub}>상대방의 username을 입력해 친구 요청을 보내세요.</Text>
           <TextInput
             autoCapitalize="none"
-            onChangeText={setUsername}
+            onChangeText={search}
             placeholder="@username"
             placeholderTextColor="#a0a8b5"
             style={styles.addInput}
             value={username}
           />
+          {results.length ? (
+            <View style={styles.searchResults}>
+              {results.slice(0, 5).map((user) => {
+                const candidateUsername = user.username || user.userName || user.handle || '';
+                const candidateName = user.nickname || user.name || candidateUsername;
+                return (
+                  <Pressable key={user.id || user.userId || candidateUsername} onPress={() => setUsername(candidateUsername)} style={styles.searchResultRow}>
+                    <Avatar label={(candidateName || '?').slice(0, 1)} color="#e8f1ff" size={30} />
+                    <View style={styles.text}>
+                      <Text style={styles.name}>{candidateName}</Text>
+                      <Text style={styles.meta}>@{candidateUsername}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
           {message ? <Text style={styles.sheetMessage}>{message}</Text> : null}
           <PrimaryButton onPress={submit}>{busy ? '요청 중...' : '친구 요청 보내기'}</PrimaryButton>
       </View>
@@ -189,6 +228,17 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     paddingHorizontal: 8,
     paddingVertical: 4,
+  },
+  webGrid: {
+    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+    gap: Platform.OS === 'web' ? 18 : 0,
+  },
+  webPanel: {
+    flex: Platform.OS === 'web' ? 0.9 : undefined,
+    minWidth: Platform.OS === 'web' ? 320 : undefined,
+  },
+  friendPanel: {
+    flex: Platform.OS === 'web' ? 1.25 : undefined,
   },
   countBadge: {
     backgroundColor: BLUE,
@@ -314,11 +364,12 @@ const styles = StyleSheet.create({
   },
   sheet: {
     backgroundColor: '#ffffff',
+    borderRadius: Platform.OS === 'web' ? 18 : 0,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
-    maxWidth: 430,
+    maxWidth: Platform.OS === 'web' ? 520 : 430,
     padding: 18,
-    paddingBottom: 104,
+    paddingBottom: Platform.OS === 'web' ? 22 : 104,
     width: '100%',
   },
   closeButton: {
@@ -373,6 +424,20 @@ const styles = StyleSheet.create({
     height: 46,
     marginBottom: 12,
     paddingHorizontal: 14,
+  },
+  searchResults: {
+    backgroundColor: '#f8fafc',
+    borderColor: LINE,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 12,
+    padding: 8,
+  },
+  searchResultRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    padding: 8,
   },
   sendButton: {
     marginTop: 4,

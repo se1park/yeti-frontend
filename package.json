@@ -6,7 +6,10 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "web:build": "expo export --platform web && node electron/patch-dist.js",
+    "desktop": "npm run web:build && electron electron/main.js",
+    "desktop:dev": "set ELECTRON_START_URL=http://localhost:8081&& electron electron/main.js"
   },
   "dependencies": {
     "expo": "~54.0.33",
@@ -22,5 +25,8 @@
     "react-native-svg": "15.12.1",
     "react-native-web": "^0.21.0"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "electron": "^42.4.0"
+  }
 }

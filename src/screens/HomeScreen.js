@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Bell, CalendarDays, ChevronLeft, ChevronRight, Clock3, MapPin, Plus, Search, Sparkles } from 'lucide-react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Bell, CalendarDays, ChevronLeft, ChevronRight, Clock3, MapPin, Plus, Sparkles } from 'lucide-react-native';
 import { Card, Pill, Screen, SectionTitle } from '../components/ui';
 import { BLUE, INK, MUTED } from '../data/yetiData';
 
@@ -155,8 +155,11 @@ function normalizeSchedule(item, index) {
 }
 
 export function HomeScreen({ apiError, goTo, notificationCount = 0, onNewSchedule, onOpenSchedule, schedules }) {
-  const today = useMemo(() => new Date(2026, 4, 20), []);
-  const [visibleMonth, setVisibleMonth] = useState(() => new Date(2026, 4, 1));
+  const today = useMemo(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  }, []);
+  const [visibleMonth, setVisibleMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [selectedDate, setSelectedDate] = useState(today);
   const calendarDays = useMemo(() => buildCalendarDays(visibleMonth), [visibleMonth]);
   const selectedKey = getDateKey(selectedDate);
@@ -188,9 +191,6 @@ export function HomeScreen({ apiError, goTo, notificationCount = 0, onNewSchedul
           <Text style={styles.brand}>{selectedLabel}</Text>
         </View>
         <View style={styles.headerActions}>
-          <Pressable style={styles.iconButton}>
-            <Search color={INK} size={18} strokeWidth={2.3} />
-          </Pressable>
           <Pressable onPress={() => goTo('notices')} style={styles.iconButton}>
             <Bell color={INK} size={18} strokeWidth={2.3} />
             {notificationCount > 0 ? (
@@ -203,72 +203,74 @@ export function HomeScreen({ apiError, goTo, notificationCount = 0, onNewSchedul
       </View>
       {apiError ? <Text style={styles.errorText}>{apiError}</Text> : null}
 
-      <Card style={styles.aiCard}>
-        <View style={styles.aiIcon}>
-          <Sparkles color="#ffffff" size={18} strokeWidth={2.5} />
-        </View>
-        <Text style={styles.aiTitle}>말로 적으면 일정이 정리돼요</Text>
-        <Text style={styles.aiCopy}>“내일 오후 2시 지민이랑 강남에서 회의”처럼 입력해보세요.</Text>
-        <View style={styles.createActions}>
-          <Pressable onPress={() => goTo('ai')} style={styles.aiButton}>
-            <Plus color="#ffffff" size={16} strokeWidth={2.5} />
-            <Text style={styles.aiButtonText}>AI로 일정 만들기</Text>
-          </Pressable>
-          <Pressable onPress={onNewSchedule} style={styles.manualButton}>
-            <Text style={styles.manualButtonText}>직접 입력</Text>
-          </Pressable>
-        </View>
-      </Card>
+      <View style={styles.dashboardGrid}>
+        <Card style={styles.aiCard}>
+          <View style={styles.aiIcon}>
+            <Sparkles color="#ffffff" size={18} strokeWidth={2.5} />
+          </View>
+          <Text style={styles.aiTitle}>말로 적으면 일정이 정리돼요</Text>
+          <Text style={styles.aiCopy}>“내일 오후 2시 @username 회의”처럼 입력해보세요.</Text>
+          <View style={styles.createActions}>
+            <Pressable onPress={() => goTo('ai')} style={styles.aiButton}>
+              <Plus color="#ffffff" size={16} strokeWidth={2.5} />
+              <Text style={styles.aiButtonText}>AI로 일정 만들기</Text>
+            </Pressable>
+            <Pressable onPress={onNewSchedule} style={styles.manualButton}>
+              <Text style={styles.manualButtonText}>직접 입력</Text>
+            </Pressable>
+          </View>
+        </Card>
 
-      <Card style={styles.calendarCard}>
-        <View style={styles.monthRow}>
-          <View style={styles.monthTitle}>
-            <CalendarDays color={BLUE} size={19} strokeWidth={2.3} />
-            <Text style={styles.month}>{getMonthLabel(visibleMonth)}</Text>
+        <Card style={styles.calendarCard}>
+          <View style={styles.monthRow}>
+            <View style={styles.monthTitle}>
+              <CalendarDays color={BLUE} size={19} strokeWidth={2.3} />
+              <Text style={styles.month}>{getMonthLabel(visibleMonth)}</Text>
+            </View>
+            <View style={styles.monthControls}>
+              <Pressable hitSlop={8} onPress={() => moveMonth(-1)} style={styles.monthButton}>
+                <ChevronLeft color={MUTED} size={18} strokeWidth={2.4} />
+              </Pressable>
+              <Pressable hitSlop={8} onPress={() => moveMonth(1)} style={styles.monthButton}>
+                <ChevronRight color={MUTED} size={18} strokeWidth={2.4} />
+              </Pressable>
+            </View>
           </View>
-          <View style={styles.monthControls}>
-            <Pressable hitSlop={8} onPress={() => moveMonth(-1)} style={styles.monthButton}>
-              <ChevronLeft color={MUTED} size={18} strokeWidth={2.4} />
-            </Pressable>
-            <Pressable hitSlop={8} onPress={() => moveMonth(1)} style={styles.monthButton}>
-              <ChevronRight color={MUTED} size={18} strokeWidth={2.4} />
-            </Pressable>
+          <View style={styles.weekRow}>
+            {weekDays.map((day, index) => (
+              <Text key={day} style={[styles.week, index === 0 && styles.sunday, index === 6 && styles.saturday]}>{day}</Text>
+            ))}
           </View>
-        </View>
-        <View style={styles.weekRow}>
-          {weekDays.map((day, index) => (
-            <Text key={day} style={[styles.week, index === 0 && styles.sunday, index === 6 && styles.saturday]}>{day}</Text>
-          ))}
-        </View>
-        <View style={styles.days}>
-          {calendarDays.map((item) => (
-            <Pressable
-              key={item.key}
-              onPress={() => selectDay(item)}
-              style={({ pressed }) => [styles.dayCell, pressed && styles.dayPressed]}
-            >
-              {markedDayKeys.has(item.key) && item.key !== selectedKey ? <View style={styles.eventHalo} /> : null}
-              <View style={[
-                styles.dayCircle,
-                markedDayKeys.has(item.key) && item.key !== selectedKey && styles.eventCircle,
-                item.key === selectedKey && styles.selectedCircle,
-                item.key === todayKey && item.key !== selectedKey && styles.todayOutline,
-              ]}>
-                <Text style={[
-                  styles.dayText,
-                  item.outside && styles.outsideDayText,
-                  item.key === selectedKey && styles.selectedDayText,
+          <View style={styles.days}>
+            {calendarDays.map((item) => (
+              <Pressable
+                key={item.key}
+                onPress={() => selectDay(item)}
+                style={({ pressed }) => [styles.dayCell, pressed && styles.dayPressed]}
+              >
+                {markedDayKeys.has(item.key) && item.key !== selectedKey ? <View style={styles.eventHalo} /> : null}
+                <View style={[
+                  styles.dayCircle,
+                  markedDayKeys.has(item.key) && item.key !== selectedKey && styles.eventCircle,
+                  item.key === selectedKey && styles.selectedCircle,
+                  item.key === todayKey && item.key !== selectedKey && styles.todayOutline,
                 ]}>
-                  {item.day}
-                </Text>
-              </View>
-              {markedDayKeys.has(item.key) ? <View style={[styles.eventMark, item.key === selectedKey && styles.selectedEventMark]} /> : null}
-            </Pressable>
-          ))}
-        </View>
-      </Card>
+                  <Text style={[
+                    styles.dayText,
+                    item.outside && styles.outsideDayText,
+                    item.key === selectedKey && styles.selectedDayText,
+                  ]}>
+                    {item.day}
+                  </Text>
+                </View>
+                {markedDayKeys.has(item.key) ? <View style={[styles.eventMark, item.key === selectedKey && styles.selectedEventMark]} /> : null}
+              </Pressable>
+            ))}
+          </View>
+        </Card>
+      </View>
 
-      <SectionTitle right="전체 보기">{selectedDate.getDate() === today.getDate() && selectedDate.getMonth() === today.getMonth() ? '오늘 일정' : '선택한 날짜 일정'}</SectionTitle>
+      <SectionTitle right="전체 보기">{selectedDate.getDate() === today.getDate() && selectedDate.getMonth() === today.getMonth() && selectedDate.getFullYear() === today.getFullYear() ? '오늘 일정' : '선택한 날짜 일정'}</SectionTitle>
       {displaySchedules.length ? (
         displaySchedules.map((item) => (
           <Pressable key={item.id || item.title} onPress={() => onOpenSchedule?.(item)}>
@@ -331,6 +333,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
   },
+  dashboardGrid: {
+    alignItems: 'stretch',
+    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+    flexWrap: 'wrap',
+    gap: Platform.OS === 'web' ? 18 : 0,
+  },
   iconButton: {
     alignItems: 'center',
     backgroundColor: '#ffffff',
@@ -365,7 +373,10 @@ const styles = StyleSheet.create({
   aiCard: {
     backgroundColor: INK,
     borderColor: INK,
+    flex: Platform.OS === 'web' ? 0.85 : undefined,
+    justifyContent: 'space-between',
     marginBottom: 14,
+    minWidth: Platform.OS === 'web' ? 310 : undefined,
   },
   aiIcon: {
     alignItems: 'center',
@@ -427,7 +438,9 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   calendarCard: {
+    flex: Platform.OS === 'web' ? 1.35 : undefined,
     paddingBottom: 14,
+    minWidth: Platform.OS === 'web' ? 440 : undefined,
   },
   monthRow: {
     alignItems: 'center',

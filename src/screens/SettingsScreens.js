@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { MessageCircle, Search, Send } from 'lucide-react-native';
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Search } from 'lucide-react-native';
 import { Avatar, Card, Pill, PrimaryButton, Screen, ToggleRow } from '../components/ui';
 import { BLUE, INK, LINE, MUTED } from '../data/yetiData';
 
@@ -21,43 +21,56 @@ export function ProfileEditScreen({ goBack, session }) {
   const displayName = getDisplayName(user);
   const username = getUsername(user);
   const email = user.email || '-';
+  const provider = user.provider || user.loginProvider || user.providerType || session?.raw?.provider || '-';
+  const createdAt = user.createdAt || user.created_at || session?.raw?.createdAt || session?.raw?.created_at || '';
+  const joinedAt = createdAt ? new Date(createdAt).toLocaleDateString('ko-KR') : '-';
   const avatarLabel = displayName.slice(0, 2).toUpperCase();
 
   return (
     <Screen left="‹" onBack={goBack} title="프로필 편집" right="저장">
-      <View style={styles.center}>
-        <Avatar label={avatarLabel} color={BLUE} size={76} />
-        <Text style={styles.camera}>▣</Text>
+      <View style={styles.desktopGrid}>
+        <Card style={styles.profileHeroCard}>
+          <View style={styles.center}>
+            <Avatar label={avatarLabel} color={BLUE} size={88} />
+            <Text style={styles.camera}>▣</Text>
+          </View>
+          <Text style={styles.profileName}>{displayName}</Text>
+          <Text style={styles.profileMeta}>@{username}</Text>
+        </Card>
+        <View style={styles.flex}>
+          <Card style={styles.formCard}>
+            <Field label="닉네임" value={displayName} />
+            <Field label="아이디 (@핸들)" value={`@ ${username}`} caption="3-20자 · 영문/숫자/_" badge="사용 가능" />
+            <Field label="상태 메시지" value={user.statusMessage || user.message || '-'} caption="서버 프로필 정보" />
+          </Card>
+          <Text style={styles.section}>계정 정보</Text>
+          <Card style={styles.formCard}>
+            <InfoRow label="이메일" value={email} />
+            <InfoRow label="가입일" value={joinedAt} />
+            <InfoRow label="로그인 방식" value={provider} />
+          </Card>
+        </View>
       </View>
-      <Card style={styles.formCard}>
-        <Field label="닉네임" value={displayName} />
-        <Field label="아이디 (@핸들)" value={`@ ${username}`} caption="3-20자 · 영문/숫자/_" badge="사용 가능" />
-        <Field label="상태 메시지" value="약속을 한 번에 끝내고 싶다" caption="0/40" />
-      </Card>
-      <Text style={styles.section}>계정 정보</Text>
-      <Card style={styles.formCard}>
-        <InfoRow label="이메일" value={email} />
-        <InfoRow label="가입일" value="2026년 4월 23일" />
-        <InfoRow label="로그인 방식" value="카카오" />
-      </Card>
     </Screen>
   );
 }
 
-export function NotificationSettingsScreen({ goBack }) {
+export function NotificationSettingsScreen({ goBack, onUpdateSettings, settings }) {
+  const notifyBeforeMin = settings?.notifyBeforeMin || 15;
+
   return (
     <Screen left="‹" onBack={goBack} title="알림 설정">
       <Text style={styles.section}>일정</Text>
       <Card style={styles.formCard}>
-        <InfoRow label="일정 시작 전 알림" value="15분 전 ›" />
-        <ToggleRow label="완료 확인 알림" enabled />
-        <ToggleRow label="학습 정리 알림" enabled />
-        <ToggleRow label="공동 일정 초대" enabled />
+        <InfoRow label="일정 시작 전 알림" value={`${notifyBeforeMin}분 전 ›`} />
+        <ToggleRow label="완료 확인 알림" enabled={settings?.notifyOnInvite !== false} onChange={(enabled) => onUpdateSettings?.({ notifyOnInvite: enabled })} />
+        <ToggleRow label="학습 정리 알림" enabled={settings?.notifyOnInvite !== false} onChange={(enabled) => onUpdateSettings?.({ notifyOnInvite: enabled })} />
+        <ToggleRow label="공동 일정 초대" enabled={settings?.notifyOnInvite !== false} onChange={(enabled) => onUpdateSettings?.({ notifyOnInvite: enabled })} />
       </Card>
       <Text style={styles.section}>채팅</Text>
       <Card style={styles.formCard}>
-        <ToggleRow label="새 메시지" enabled />
-        <ToggleRow label="@멘션 강조" enabled />
+        <ToggleRow label="새 메시지" enabled={settings?.notifyOnChat !== false} onChange={(enabled) => onUpdateSettings?.({ notifyOnChat: enabled })} />
+        <ToggleRow label="@멘션 강조" enabled={settings?.notifyOnChat !== false} onChange={(enabled) => onUpdateSettings?.({ notifyOnChat: enabled })} />
       </Card>
       <Text style={styles.section}>시스템</Text>
       <Card style={styles.formCard}>
@@ -142,12 +155,6 @@ export function HelpFaqScreen({ goBack }) {
         <Faq title="학습 노트 AI 요약 사용법" />
         <Faq title="계정을 삭제하면 데이터가 사라지나요?" />
       </Card>
-      <PrimaryButton>
-        <View style={styles.buttonLabel}>
-          <Send color="#ffffff" size={15} strokeWidth={2.4} />
-          <Text style={styles.buttonLabelText}>문의 보내기</Text>
-        </View>
-      </PrimaryButton>
     </Screen>
   );
 }
@@ -169,11 +176,6 @@ export function TermsPrivacyScreen({ goBack }) {
         <InfoRow label="위치기반서비스 약관" value="v1.2 · 25.10.12 ›" />
         <InfoRow label="오픈소스 라이선스" value="231개 ›" />
         <InfoRow label="청소년 보호정책" value="›" />
-      </Card>
-      <Text style={styles.section}>데이터 관리</Text>
-      <Card style={styles.formCard}>
-        <InfoRow label="내 데이터 다운로드" value="›" />
-        <InfoRow label="계정 영구 삭제" value="›" danger />
       </Card>
     </Screen>
   );
@@ -270,115 +272,80 @@ export function ScheduleEditScreen({ apiBusy, apiError, goBack, onCreate, onSave
       bottom={<PrimaryButton onPress={submit}>{apiBusy ? '저장 중...' : '일정 저장'}</PrimaryButton>}
     >
       {localError || apiError ? <Text style={styles.errorText}>{localError || apiError}</Text> : null}
-      <Text style={styles.section}>기본 정보</Text>
-      <Card style={styles.formCard}>
-        <EditField label="제목" value={title} onChangeText={setTitle} placeholder="예: 지민이와 회의" />
-        <EditField label="메모" value={description} onChangeText={setDescription} multiline placeholder="일정 설명을 입력하세요" />
-        <Text style={styles.fieldLabel}>카테고리</Text>
-        <View style={styles.chips}>
-          {['약속', '업무', '학습', '이동'].map((item) => (
-            <Pressable key={item} onPress={() => setCategory(item)}>
-              <Pill tone={category === item ? 'blue' : 'gray'}>{item}</Pill>
-            </Pressable>
-          ))}
+      <View style={styles.editorGrid}>
+        <View style={styles.editorMain}>
+          <Text style={styles.section}>기본 정보</Text>
+          <Card style={styles.formCard}>
+            <EditField label="제목" value={title} onChangeText={setTitle} placeholder="예: 회의 또는 스터디" />
+            <EditField label="메모" value={description} onChangeText={setDescription} multiline placeholder="일정 설명을 입력하세요" />
+            <Text style={styles.fieldLabel}>카테고리</Text>
+            <View style={styles.chips}>
+              {['약속', '업무', '학습', '이동'].map((item) => (
+                <Pressable key={item} onPress={() => setCategory(item)}>
+                  <Pill tone={category === item ? 'blue' : 'gray'}>{item}</Pill>
+                </Pressable>
+              ))}
+            </View>
+          </Card>
+          <Text style={styles.section}>참여자</Text>
+          <Card style={styles.formCard}>
+            <EditField
+              label="사용자명"
+              value={participants}
+              onChangeText={setParticipants}
+              placeholder="예: swon7150, yujin"
+              caption="여러 명이면 쉼표로 구분하세요."
+            />
+          </Card>
         </View>
-      </Card>
-
-      <Text style={styles.section}>시간</Text>
-      <Card style={styles.formCard}>
-        <ToggleRow label="종일 일정" enabled={allDay} onChange={setAllDay} />
-        <EditField label="시작" value={startAt} onChangeText={setStartAt} placeholder="2026-05-20T14:00" />
-        <EditField label="종료" value={endAt} onChangeText={setEndAt} placeholder="2026-05-20T15:00" />
-        <ToggleRow label="반복 일정" enabled={recurring} onChange={setRecurring} />
-        {recurring ? <EditField label="반복 규칙" value={recurrenceRule} onChangeText={setRecurrenceRule} placeholder="예: FREQ=WEEKLY;INTERVAL=1" /> : null}
-      </Card>
-
-      <Text style={styles.section}>장소와 공개 범위</Text>
-      <Card style={styles.formCard}>
-        <EditField label="장소" value={location} onChangeText={setLocation} placeholder="예: 강남역" />
-        <Text style={styles.fieldLabel}>공개 범위</Text>
-        <View style={styles.chips}>
-          {[
-            ['PRIVATE', '나만 보기'],
-            ['FRIENDS', '친구 공개'],
-            ['PUBLIC', '전체 공개'],
-          ].map(([value, label]) => (
-            <Pressable key={value} onPress={() => setVisibility(value)}>
-              <Pill tone={visibility === value ? 'blue' : 'gray'}>{label}</Pill>
-            </Pressable>
-          ))}
+        <View style={styles.editorSide}>
+          <Text style={styles.section}>시간</Text>
+          <Card style={styles.formCard}>
+            <ToggleRow label="종일 일정" enabled={allDay} onChange={setAllDay} />
+            <EditField label="시작" value={startAt} onChangeText={setStartAt} placeholder="YYYY-MM-DDTHH:mm" />
+            <EditField label="종료" value={endAt} onChangeText={setEndAt} placeholder="YYYY-MM-DDTHH:mm" />
+            <ToggleRow label="반복 일정" enabled={recurring} onChange={setRecurring} />
+            {recurring ? <EditField label="반복 규칙" value={recurrenceRule} onChangeText={setRecurrenceRule} placeholder="예: FREQ=WEEKLY;INTERVAL=1" /> : null}
+          </Card>
+          <Text style={styles.section}>장소와 공개 범위</Text>
+          <Card style={styles.formCard}>
+            <EditField label="장소" value={location} onChangeText={setLocation} placeholder="예: 강남역" />
+            <Text style={styles.fieldLabel}>공개 범위</Text>
+            <View style={styles.chips}>
+              {[
+                ['PRIVATE', '나만 보기'],
+                ['FRIENDS', '친구 공개'],
+                ['PUBLIC', '전체 공개'],
+              ].map(([value, label]) => (
+                <Pressable key={value} onPress={() => setVisibility(value)}>
+                  <Pill tone={visibility === value ? 'blue' : 'gray'}>{label}</Pill>
+                </Pressable>
+              ))}
+            </View>
+          </Card>
         </View>
-      </Card>
-
-      <Text style={styles.section}>참여자</Text>
-      <Card style={styles.formCard}>
-        <EditField
-          label="사용자명"
-          value={participants}
-          onChangeText={setParticipants}
-          placeholder="예: swon7150, yujin"
-          caption="여러 명이면 쉼표로 구분하세요."
-        />
-      </Card>
+      </View>
     </Screen>
   );
 }
 
-export function FriendProfileScreen({ apiError, friend, goBack, onChat }) {
-  const username = friend?.username || friend?.handle?.replace(/^@/, '') || 'user';
-  const displayName = friend?.nickname || friend?.name || username;
-  const statusMessage = friend?.statusMessage || friend?.message || '상태 메시지가 없습니다.';
-  const avatarLabel = displayName.slice(0, 1).toUpperCase();
-  const profileImageUrl = friend?.profileImageUrl || friend?.profile_image_url || '';
+export function ChatSettingsScreen({ goBack, room }) {
+  const roomName = room?.name || '선택된 채팅방';
+  const roomType = room?.type || '';
+  const memberCount = room?.memberCount ?? 0;
 
-  return (
-    <Screen left="‹" onBack={goBack} right="···">
-      <View style={styles.profileCenter}>
-        <Avatar label="지" color={BLUE} size={76} />
-        <Text style={styles.profileName}>김지민</Text>
-        <Text style={styles.profileMeta}>@jimin_k · 활동 중</Text>
-        <Text style={styles.quote}>"오늘도 좋은 하루!"</Text>
-      </View>
-      <View style={styles.statsRow}>
-        <MiniStat value="14" label="함께한 약속" />
-        <MiniStat value="23일" label="친구된 지" />
-        <MiniStat value="5" label="함께 한 채팅방" />
-      </View>
-      <View style={styles.actionRow}>
-        <PrimaryButton style={styles.actionButton}>
-          <View style={styles.buttonLabel}>
-            <MessageCircle color="#ffffff" size={15} strokeWidth={2.4} />
-            <Text style={styles.buttonLabelText}>채팅</Text>
-          </View>
-        </PrimaryButton>
-        <PrimaryButton style={styles.actionButton}>✦ 함께 일정</PrimaryButton>
-      </View>
-      <Text style={styles.section}>함께 예정된 일정</Text>
-      <Card style={styles.formCard}><InfoRow label="지민이와 회의" value="5월 19일(화) · 오후 2:00 ›" /></Card>
-      <Text style={styles.section}>더보기</Text>
-      <Card style={styles.formCard}>
-        <InfoRow label="알림 끄기" value="" />
-        <InfoRow label="차단하기" value="" danger />
-        <InfoRow label="신고하기" value="" danger />
-      </Card>
-    </Screen>
-  );
-}
-
-export function ChatSettingsScreen({ goBack }) {
   return (
     <Screen left="‹" onBack={goBack} title="채팅방 설정">
       <View style={styles.profileCenter}>
-        <Avatar label="ㅎ" color="#fff3d9" size={66} />
-        <Text style={styles.profileName}>북한산 등산</Text>
-        <Text style={styles.profileMeta}>그룹 채팅 · 멤버 4명</Text>
+        <Avatar label={roomName.slice(0, 1)} color={BLUE} size={66} />
+        <Text style={styles.profileName}>{roomName}</Text>
+        <Text style={styles.profileMeta}>{roomType || '채팅방'} · 멤버 {memberCount}명</Text>
       </View>
-      <Text style={styles.section}>고정된 일정</Text>
-      <Card style={styles.formCard}><InfoRow label="북한산 등산" value="5월 23일(토) · 오전 9시 ›" /></Card>
-      <Text style={styles.section}>멤버 4</Text>
+      <Text style={styles.section}>채팅방 정보</Text>
       <Card style={styles.formCard}>
-        {['나 · 소유자', '김지민 · 관리자', '박수아 · 멤버', '이현우 · 멤버'].map((item) => <InfoRow key={item} label={item} value="" />)}
-        <InfoRow label="+ 멤버 초대" value="" />
+        <InfoRow label="방 유형" value={roomType || '-'} />
+        <InfoRow label="멤버 수" value={`${memberCount}명`} />
+        <InfoRow label="생성일" value={room?.createdAt ? new Date(room.createdAt).toLocaleString('ko-KR') : '-'} />
       </Card>
       <Text style={styles.section}>알림</Text>
       <Card style={styles.formCard}><ToggleRow label="알림 켜기" enabled /></Card>
@@ -386,22 +353,27 @@ export function ChatSettingsScreen({ goBack }) {
   );
 }
 
-export function ChatSearchScreen({ goBack }) {
+export function ChatSearchScreen({ goBack, messages = [], room }) {
+  const keyword = room?.name || '채팅';
+  const displayMessages = (messages || []).filter((message) => !message.deleted).slice(0, 10);
+
   return (
-    <Screen left="‹" onBack={goBack} title="등산">
+    <Screen left="‹" onBack={goBack} title="검색">
       <View style={styles.chips}>
-        {['전체 18', '채팅 8', '메시지 6', '일정 3', '친구 1'].map((item, index) => <Pill key={item} tone={index === 0 ? 'gray' : 'blue'}>{item}</Pill>)}
+        {[`검색어 ${keyword}`, `메시지 ${displayMessages.length}`].map((item, index) => <Pill key={item} tone={index === 0 ? 'gray' : 'blue'}>{item}</Pill>)}
       </View>
       <Text style={styles.section}>채팅방</Text>
-      <Card style={styles.formCard}><InfoRow label="북한산 등산" value="그룹 채팅 · 4명 ›" /></Card>
-      <Text style={styles.section}>메시지 6개</Text>
+      <Card style={styles.formCard}><InfoRow label={room?.name || '선택된 채팅방 없음'} value={room?.type || ''} /></Card>
+      <Text style={styles.section}>메시지 {displayMessages.length}개</Text>
       <Card style={styles.formCard}>
-        <InfoRow label="이현우 · 북한산 등산" value="그날 오전 9시는 좀 어려울 것 같아요. 등산 코스 바꿔도 될까요?" />
-        <InfoRow label="박수아 · 북한산 등산" value="등산화 빌릴 수 있는데 알아보고 있어요." />
-        <InfoRow label="김지민 · 헬스 메이트" value="이번 주 토요일 등산 같이 갈 사람?" />
+        {displayMessages.length ? displayMessages.map((message) => (
+          <InfoRow
+            key={message.id || message.createdAt}
+            label={message.senderNickname || message.senderUsername || '사용자'}
+            value={message.content || message.messageType || ''}
+          />
+        )) : <InfoRow label="검색할 메시지가 없습니다" value="" />}
       </Card>
-      <Text style={styles.section}>일정 3개</Text>
-      <Card style={styles.formCard}><InfoRow label="북한산 등산" value="5월 23일(토) · 오전 9시 · 우이동" /></Card>
     </Screen>
   );
 }
@@ -487,10 +459,27 @@ function MiniStat({ value, label }) {
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   center: { alignItems: 'center', marginBottom: 20 },
   camera: { backgroundColor: INK, borderRadius: 12, color: '#ffffff', marginTop: -20, overflow: 'hidden', padding: 6 },
   section: { color: MUTED, fontSize: 12, fontWeight: '900', marginBottom: 8, marginTop: 10 },
   formCard: { backgroundColor: '#ffffff', shadowOpacity: 0 },
+  desktopGrid: {
+    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+    gap: Platform.OS === 'web' ? 18 : 0,
+  },
+  profileHeroCard: {
+    alignItems: 'center',
+    alignSelf: Platform.OS === 'web' ? 'flex-start' : 'stretch',
+    minWidth: Platform.OS === 'web' ? 280 : undefined,
+    paddingVertical: 30,
+  },
+  editorGrid: {
+    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+    gap: Platform.OS === 'web' ? 18 : 0,
+  },
+  editorMain: { flex: Platform.OS === 'web' ? 1.25 : undefined, minWidth: Platform.OS === 'web' ? 420 : undefined },
+  editorSide: { flex: 1, minWidth: Platform.OS === 'web' ? 360 : undefined },
   field: { borderBottomColor: LINE, borderBottomWidth: 1, paddingVertical: 12 },
   fieldLabel: { color: MUTED, fontSize: 11, fontWeight: '900', marginBottom: 6 },
   fieldRow: { alignItems: 'center', flexDirection: 'row' },

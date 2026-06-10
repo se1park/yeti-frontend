@@ -11,6 +11,60 @@ function getStorage() {
   return null;
 }
 
+function getSecureStorage() {
+  if (typeof globalThis !== 'undefined' && globalThis.yetiDesktop?.secureStorage) {
+    return globalThis.yetiDesktop.secureStorage;
+  }
+  return null;
+}
+
+async function getPersistedSessionText() {
+  const secureStorage = getSecureStorage();
+  const storage = getStorage();
+
+  if (secureStorage) {
+    const secured = await secureStorage.getItem(SESSION_KEY);
+    if (secured) return secured;
+
+    const legacy = storage?.getItem(SESSION_KEY);
+    if (legacy) {
+      const saved = await secureStorage.setItem(SESSION_KEY, legacy);
+      if (saved) {
+        storage?.removeItem(SESSION_KEY);
+      }
+      return legacy;
+    }
+
+    return null;
+  }
+
+  return storage?.getItem(SESSION_KEY) || null;
+}
+
+async function setPersistedSessionText(value) {
+  const secureStorage = getSecureStorage();
+  const storage = getStorage();
+
+  if (secureStorage) {
+    const saved = await secureStorage.setItem(SESSION_KEY, value);
+    if (saved) {
+      storage?.removeItem(SESSION_KEY);
+      return;
+    }
+    storage?.setItem(SESSION_KEY, value);
+    return;
+  }
+
+  storage?.setItem(SESSION_KEY, value);
+}
+
+async function removePersistedSessionText() {
+  const secureStorage = getSecureStorage();
+  const storage = getStorage();
+  await secureStorage?.removeItem(SESSION_KEY);
+  storage?.removeItem(SESSION_KEY);
+}
+
 function readToken(payload, key) {
   return (
     payload?.[key]
@@ -224,6 +278,7 @@ async function parseResponse(response) {
 }
 
 export async function request(path, { method = 'GET', body, token, query } = {}) {
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
   const headers = {
     Accept: 'application/json',
   };
@@ -232,7 +287,7 @@ export async function request(path, { method = 'GET', body, token, query } = {})
     headers['ngrok-skip-browser-warning'] = 'true';
   }
 
-  if (body !== undefined) {
+  if (body !== undefined && !isFormData) {
     headers['Content-Type'] = 'application/json';
   }
 
@@ -254,7 +309,7 @@ export async function request(path, { method = 'GET', body, token, query } = {})
       method,
       headers,
       mode: 'cors',
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : isFormData ? body : JSON.stringify(body),
     });
   } catch (error) {
     const message = API_BASE_URL.includes('ngrok')
@@ -278,18 +333,12 @@ export async function saveSession(session) {
   const nextSession = session ? { ...session, user: normalizedUser } : session;
   saveCachedProfile(normalizedUser);
   memorySession = nextSession;
-  const storage = getStorage();
-  if (storage) {
-    storage.setItem(SESSION_KEY, JSON.stringify(nextSession));
-  }
+  await setPersistedSessionText(JSON.stringify(nextSession));
 }
 
 export async function loadSession() {
-  const storage = getStorage();
-  if (!storage) return memorySession;
-
-  const saved = storage.getItem(SESSION_KEY);
-  if (!saved) return null;
+  const saved = await getPersistedSessionText();
+  if (!saved) return memorySession;
 
   try {
     memorySession = JSON.parse(saved);
@@ -300,15 +349,14 @@ export async function loadSession() {
     }
     return memorySession;
   } catch {
-    storage.removeItem(SESSION_KEY);
+    await removePersistedSessionText();
     return null;
   }
 }
 
 export async function clearSession() {
   memorySession = null;
-  const storage = getStorage();
-  storage?.removeItem(SESSION_KEY);
+  await removePersistedSessionText();
 }
 
 export async function signup(body) {

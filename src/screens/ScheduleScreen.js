@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Modal, StyleSheet, Text, View } from 'react-native';
+import { Modal, Platform, StyleSheet, Text, View } from 'react-native';
 import { Avatar, Card, Pill, PrimaryButton, Screen, SecondaryButton } from '../components/ui';
 import { BLUE, INK, MUTED } from '../data/yetiData';
 
@@ -78,50 +78,56 @@ export function ScheduleScreen({ apiError, goTo, goBack, onComplete, onDelete, o
       >
         {detail ? (
           <>
-            <Pill tone="yellow">{detail.category || '일정'}</Pill>
-            <Text style={styles.title}>{detail.title}</Text>
-            {localError || apiError ? <Text style={styles.errorText}>{localError || apiError}</Text> : null}
-            <Text style={styles.infoStrong}>▣  {formatDate(detail.startAt)}</Text>
-            <Text style={styles.info}>{formatTime(detail.startAt)} - {formatTime(detail.endAt)}</Text>
-            <Text style={styles.infoStrong}>⌖  {detail.location || '-'}</Text>
-            <Text style={styles.info}>{detail.description || '메모가 없습니다.'}</Text>
-            <Text style={styles.privacy}>⊙ {detail.visibility || 'PRIVATE'}</Text>
-            <View style={styles.quickActions}>
-              {canOpenStudyNote ? (
-                <SecondaryButton onPress={() => onOpenStudyNote?.(detail)} style={styles.quickButton}>학습 노트</SecondaryButton>
-              ) : null}
-              <SecondaryButton onPress={remove} style={styles.quickButton}>삭제</SecondaryButton>
-            </View>
-            <Card style={styles.peopleCard}>
-              <View style={styles.peopleHeader}>
-                <Text style={styles.peopleTitle}>참여자 {participantList.length}</Text>
-              </View>
-              {participantList.length ? participantList.map((person) => (
-                <View key={person.id} style={styles.personRow}>
-                  <Avatar label={person.initial} color={person.color} />
-                  <View style={styles.personText}>
-                    <Text style={styles.personName}>{person.name}</Text>
-                    <Text style={styles.personRole}>{person.role}</Text>
-                  </View>
-                  <Pill tone={person.status === 'ACCEPTED' ? 'green' : person.status === 'OWNER' ? 'gray' : 'blue'}>{person.status}</Pill>
-                  {scheduleId && person.id ? (
-                    <Text onPress={() => onParticipantStatus?.(scheduleId, person.id, { status: 'ACCEPTED' })} style={styles.acceptLink}>수락</Text>
+            <View style={styles.detailGrid}>
+              <Card style={styles.detailMainCard}>
+                <Pill tone="yellow">{detail.category || '일정'}</Pill>
+                <Text style={styles.title}>{detail.title}</Text>
+                {localError || apiError ? <Text style={styles.errorText}>{localError || apiError}</Text> : null}
+                <Text style={styles.infoStrong}>▣  {formatDate(detail.startAt)}</Text>
+                <Text style={styles.info}>{formatTime(detail.startAt)} - {formatTime(detail.endAt)}</Text>
+                <Text style={styles.infoStrong}>⌖  {detail.location || '-'}</Text>
+                <Text style={styles.info}>{detail.description || '메모가 없습니다.'}</Text>
+                <Text style={styles.privacy}>⊙ {detail.visibility || 'PRIVATE'}</Text>
+                <View style={styles.quickActions}>
+                  {canOpenStudyNote ? (
+                    <SecondaryButton onPress={() => onOpenStudyNote?.(detail)} style={styles.quickButton}>학습 노트</SecondaryButton>
                   ) : null}
+                  <SecondaryButton onPress={remove} style={styles.quickButton}>삭제</SecondaryButton>
                 </View>
-              )) : (
-                <Text style={styles.emptyText}>참여자 정보가 없습니다.</Text>
-              )}
-            </Card>
-            {scheduleId && participantList[0]?.id ? (
-              <PrimaryButton
-                onPress={() => onProposeAdjust?.(scheduleId, participantList[0].id, {
-                  proposedStart: detail.startAt,
-                  proposedEnd: detail.endAt,
-                })}
-              >
-                현재 시간으로 조율 제안
-              </PrimaryButton>
-            ) : null}
+              </Card>
+              <View style={styles.detailSide}>
+                <Card style={styles.peopleCard}>
+                  <View style={styles.peopleHeader}>
+                    <Text style={styles.peopleTitle}>참여자 {participantList.length}</Text>
+                  </View>
+                  {participantList.length ? participantList.map((person) => (
+                    <View key={person.id} style={styles.personRow}>
+                      <Avatar label={person.initial} color={person.color} />
+                      <View style={styles.personText}>
+                        <Text style={styles.personName}>{person.name}</Text>
+                        <Text style={styles.personRole}>{person.role}</Text>
+                      </View>
+                      <Pill tone={person.status === 'ACCEPTED' ? 'green' : person.status === 'OWNER' ? 'gray' : 'blue'}>{person.status}</Pill>
+                      {scheduleId && person.id ? (
+                        <Text onPress={() => onParticipantStatus?.(scheduleId, person.id, { status: 'ACCEPTED' })} style={styles.acceptLink}>수락</Text>
+                      ) : null}
+                    </View>
+                  )) : (
+                    <Text style={styles.emptyText}>참여자 정보가 없습니다.</Text>
+                  )}
+                </Card>
+                {scheduleId && participantList[0]?.id ? (
+                  <PrimaryButton
+                    onPress={() => onProposeAdjust?.(scheduleId, participantList[0].id, {
+                      proposedStart: detail.startAt,
+                      proposedEnd: detail.endAt,
+                    })}
+                  >
+                    현재 시간으로 조율 제안
+                  </PrimaryButton>
+                ) : null}
+              </View>
+            </View>
           </>
         ) : (
           <Card style={styles.emptyCard}>
@@ -156,6 +162,18 @@ function CompleteSheet({ title, visible, onClose }) {
 const styles = StyleSheet.create({
   flex: {
     flex: 1,
+  },
+  detailGrid: {
+    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+    gap: Platform.OS === 'web' ? 18 : 0,
+  },
+  detailMainCard: {
+    flex: Platform.OS === 'web' ? 1.1 : undefined,
+    minWidth: Platform.OS === 'web' ? 420 : undefined,
+  },
+  detailSide: {
+    flex: Platform.OS === 'web' ? 0.9 : undefined,
+    minWidth: Platform.OS === 'web' ? 320 : undefined,
   },
   title: {
     color: INK,

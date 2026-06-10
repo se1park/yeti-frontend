@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Text, TextInput, View } from 'react-native';
+import { Platform, Text, TextInput, View } from 'react-native';
 import { useFonts } from 'expo-font';
 import { AppFrame, useHiddenWebScrollbars } from './src/components/AppFrame';
 import { BottomTabs } from './src/components/BottomTabs';
@@ -12,7 +12,7 @@ import { FriendsScreen } from './src/screens/FriendsScreen';
 import { FriendProfileScreen } from './src/screens/FriendProfileScreen';
 import { ProfileScreen } from './src/screens/ProfileScreen';
 import { StudyNoteScreen } from './src/screens/StudyNoteScreen';
-import { AdminScreen, NotificationsScreen } from './src/screens/UtilityScreens';
+import { AdminScreen, ApiDiagnosticsScreen, NotificationsScreen } from './src/screens/UtilityScreens';
 import {
   clearSession,
   completeOnboarding,
@@ -41,18 +41,40 @@ import {
   getChatRooms,
   getFriendRequests,
   getFriends,
+  getNotifications,
   getSchedules,
   getSchedule,
   getScheduleInvitations,
   getStudyNotes,
+  getUnreadNotificationCount,
+  getUserSettings,
+  markAllNotificationsRead,
+  markNotificationRead,
   parseSchedule,
+  parseVoiceSchedule,
   proposeScheduleAdjust,
   reactToChatMessage,
   rejectFriendRequest,
   respondToInvitation,
   sendFriendRequest,
+  searchUsers,
   summarizeStudyNote,
   updateSchedule,
+  updateUserSettings,
+  getAdminDashboard,
+  getAdminUsers,
+  getAdminSchedules,
+  getAdminReports,
+  getAdminApiLogs,
+  getAdminAiLogs,
+  getMaintenanceMode,
+  activateAdminUser,
+  registerFcmToken,
+  reviewAdminReport,
+  setMaintenanceMode,
+  sendAdminBroadcast,
+  sendAdminEmail,
+  suspendAdminUser,
 } from './src/api/yeti';
 import {
   ChatSearchScreen,
@@ -196,13 +218,19 @@ function normalizeScheduleValue(value) {
   const endAt = item.endAt || item.end_at || item.end || item.endedAt || item.endsAt;
   const recurrenceRule = getRecurrenceRule(item);
   const id = item.id || item.scheduleId;
+  const participants = normalizeScheduleParticipants(item.participants);
+  const participantUsernames = Array.from(new Set([
+    ...(Array.isArray(item.participantUsernames) ? item.participantUsernames : []),
+    ...participants.map((participant) => participant.username),
+  ].map(normalizeParticipantUsername).filter(Boolean)));
   return {
     ...item,
     allDay: Boolean(item.allDay),
     completed: Boolean(item.completed || item.status === 'COMPLETED'),
     id,
     owner: Boolean(item.owner),
-    participants: normalizeScheduleParticipants(item.participants),
+    participants,
+    participantUsernames,
     recurrenceRule,
     recurring: getRecurringFlag(item, recurrenceRule),
     scheduleId: item.scheduleId || id,
@@ -278,10 +306,14 @@ function normalizeParticipantUsername(value) {
 }
 
 function getParsedParticipantUsernames(schedule, input) {
+  const explicitUsernames = Array.isArray(schedule?.participantUsernames)
+    ? schedule.participantUsernames.map(normalizeParticipantUsername)
+    : [];
   const parsedParticipants = Array.isArray(schedule?.participants)
     ? schedule.participants.map(normalizeParticipantUsername)
     : [];
   return Array.from(new Set([
+    ...explicitUsernames,
     ...parsedParticipants,
     ...getMentionedUsernames(input),
   ].filter(Boolean)));
@@ -331,9 +363,9 @@ function getFriendUsername(friend) {
 }
 
 Text.defaultProps = Text.defaultProps || {};
-Text.defaultProps.style = [{ fontFamily: 'Pretendard' }, Text.defaultProps.style];
+Text.defaultProps.style = [{ fontFamily: Platform.OS === 'web' ? 'Pretendard, Arial, sans-serif' : 'Pretendard' }, Text.defaultProps.style];
 TextInput.defaultProps = TextInput.defaultProps || {};
-TextInput.defaultProps.style = [{ fontFamily: 'Pretendard' }, TextInput.defaultProps.style];
+TextInput.defaultProps.style = [{ fontFamily: Platform.OS === 'web' ? 'Pretendard, Arial, sans-serif' : 'Pretendard' }, TextInput.defaultProps.style];
 
 export default function App() {
   useHiddenWebScrollbars();
@@ -355,6 +387,11 @@ export default function App() {
   const [friends, setFriends] = useState([]);
   const [friendRequests, setFriendRequests] = useState([]);
   const [scheduleInvitations, setScheduleInvitations] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const [userSettings, setUserSettings] = useState(null);
+  const [adminData, setAdminData] = useState({});
+  const [apiDiagnostics, setApiDiagnostics] = useState([]);
   const [parsedSchedule, setParsedSchedule] = useState(null);
   const [parsedScheduleInput, setParsedScheduleInput] = useState('');
   const [selectedFriend, setSelectedFriend] = useState(null);
@@ -481,7 +518,10 @@ export default function App() {
       runWithProtectedToken((token) => getFriendRequests(token)),
       runWithProtectedToken((token) => getScheduleInvitations(token)),
       runWithProtectedToken((token) => getChatRooms(token)),
-    ]).then(([scheduleResult, friendResult, requestResult, invitationResult, roomResult]) => {
+      runWithProtectedToken((token) => getNotifications(token, { size: 20 })),
+      runWithProtectedToken((token) => getUnreadNotificationCount(token)),
+      runWithProtectedToken((token) => getUserSettings(token)),
+    ]).then(([scheduleResult, friendResult, requestResult, invitationResult, roomResult, notificationResult, unreadResult, settingsResult]) => {
       if (cancelled) return;
 
       if (scheduleResult.status === 'fulfilled') {
@@ -499,6 +539,18 @@ export default function App() {
       if (roomResult.status === 'fulfilled') {
         setChatRooms(toArray(roomResult.value));
       }
+      if (notificationResult.status === 'fulfilled') {
+        setNotifications(toArray(notificationResult.value));
+      }
+      if (unreadResult.status === 'fulfilled') {
+        const unread = unreadResult.value;
+        setUnreadNotificationCount(Number(unread?.count ?? unread?.unreadCount ?? unread?.unread ?? Object.values(unread || {})[0] ?? 0));
+      }
+      if (settingsResult.status === 'fulfilled') {
+        setUserSettings(settingsResult.value);
+      } else if ([401, 403].includes(settingsResult.reason?.status)) {
+        setUserSettings((previous) => previous || { notifyBeforeMin: 15, notifyOnChat: true, notifyOnInvite: true });
+      }
 
       if (scheduleResult.status === 'rejected') {
         setApiError(scheduleResult.reason?.message || '일정을 불러오지 못했습니다.');
@@ -514,11 +566,40 @@ export default function App() {
     };
   }, [runWithProtectedToken, session?.accessToken, session?.newUser]);
 
+  const refreshNotifications = useCallback(async () => {
+    if (!session?.accessToken || session.newUser) return;
+    const [notificationResult, unreadResult] = await Promise.allSettled([
+      runWithProtectedToken((token) => getNotifications(token, { size: 20 })),
+      runWithProtectedToken((token) => getUnreadNotificationCount(token)),
+    ]);
+    if (notificationResult.status === 'fulfilled') {
+      setNotifications(toArray(notificationResult.value));
+    }
+    if (unreadResult.status === 'fulfilled') {
+      const unread = unreadResult.value;
+      setUnreadNotificationCount(Number(unread?.count ?? unread?.unreadCount ?? unread?.unread ?? Object.values(unread || {})[0] ?? 0));
+    }
+  }, [runWithProtectedToken, session?.accessToken, session?.newUser]);
+
   useEffect(() => {
     if (screen === 'friends') {
       refreshFriendData();
     }
   }, [refreshFriendData, screen]);
+
+  useEffect(() => {
+    if (screen === 'notices') {
+      refreshNotifications();
+    }
+  }, [refreshNotifications, screen]);
+
+  useEffect(() => {
+    if (screen === 'admin' && session?.accessToken && !session.newUser) {
+      refreshAdminData().catch((error) => {
+        setAdminData({ errors: [error.message || '관리자 데이터를 불러오지 못했습니다.'] });
+      });
+    }
+  }, [screen, session?.accessToken, session?.newUser]);
 
   const goTo = (nextScreen) => {
     if (nextScreen === screen) return;
@@ -598,12 +679,38 @@ export default function App() {
   };
 
   const handleOAuth = (provider, token) => {
-    if (!token?.trim()) {
+    const tokens = (Array.isArray(token) ? token : [token])
+      .map((value) => String(value || '').trim())
+      .filter(Boolean);
+
+    if (!tokens.length) {
       setAuthError(`${provider === 'kakao' ? 'Kakao' : 'Google'} OAuth 토큰을 입력해주세요.`);
       return;
     }
 
-    runAuth(() => oauthLogin(provider, token.trim()));
+    runAuth(async () => {
+      let lastError = null;
+
+      for (const nextToken of tokens) {
+        try {
+          return await oauthLogin(provider, nextToken);
+        } catch (error) {
+          lastError = error;
+          if (![401, 403].includes(error?.status)) break;
+        }
+      }
+
+      throw lastError;
+    });
+  };
+
+  const handleLogoPress = () => {
+    setHistory([]);
+    if (session?.accessToken && !session.newUser) {
+      setScreen('home');
+      return;
+    }
+    setScreen('intro');
   };
 
   const handleOnboarding = async (profile) => {
@@ -687,6 +794,30 @@ export default function App() {
       return parsed;
     } catch (error) {
       setApiError(error.message || 'AI 일정 파싱에 실패했습니다.');
+      throw error;
+    } finally {
+      setApiBusy(false);
+    }
+  };
+
+  const handleParseVoiceSchedule = async (audio) => {
+    setApiBusy(true);
+    setApiError('');
+    try {
+      const token = await getProtectedToken();
+      const payload = await parseVoiceSchedule(audio, token);
+      const transcribedText = payload?.transcribedText || payload?.data?.transcribedText || '';
+      const parsed = {
+        ...refineParsedScheduleFromInput(normalizeScheduleValue(payload), transcribedText),
+        transcribedText,
+      };
+      setParsedSchedule(parsed);
+      setParsedScheduleInput(transcribedText);
+      setHistory((previous) => [...previous, screen]);
+      setScreen('aiReview');
+      return parsed;
+    } catch (error) {
+      setApiError(error.message || '음성 일정 파싱에 실패했습니다.');
       throw error;
     } finally {
       setApiBusy(false);
@@ -873,7 +1004,145 @@ export default function App() {
 
   const handleProposeAdjust = async (scheduleId, userId, body) => {
     const token = await getProtectedToken();
-    return proposeScheduleAdjust(scheduleId, userId, body, token);
+    return proposeScheduleAdjust(scheduleId, body, token, userId);
+  };
+
+  const handleMarkNotificationRead = async (id) => {
+    if (!id) return;
+    await runWithProtectedToken((token) => markNotificationRead(id, token));
+    await refreshNotifications();
+  };
+
+  const handleMarkAllNotificationsRead = async () => {
+    await runWithProtectedToken((token) => markAllNotificationsRead(token));
+    await refreshNotifications();
+  };
+
+  const handleUpdateUserSettings = async (body) => {
+    const nextSettings = { ...(userSettings || { notifyBeforeMin: 15, notifyOnChat: true, notifyOnInvite: true }), ...body };
+    try {
+      const updated = await runWithProtectedToken((token) => updateUserSettings(body, token));
+      setUserSettings(updated);
+      return updated;
+    } catch (error) {
+      if ([401, 403].includes(error?.status)) {
+        setUserSettings(nextSettings);
+        setApiError('사용자 설정 API 권한이 막혀 있어 앱 안에서만 임시 반영했습니다. 백엔드 /api/users/settings 권한 설정을 확인해야 합니다.');
+        return nextSettings;
+      }
+      throw error;
+    }
+  };
+
+  const refreshAdminData = async () => {
+    const token = await getProtectedToken();
+    const defaultPage = { page: 0, size: 10 };
+    const [
+      dashboard,
+      users,
+      schedulesResult,
+      reports,
+      apiLogs,
+      aiLogs,
+      maintenance,
+    ] = await Promise.allSettled([
+      getAdminDashboard(token),
+      getAdminUsers(token, defaultPage),
+      getAdminSchedules(token, defaultPage),
+      getAdminReports(token, defaultPage),
+      getAdminApiLogs(token, defaultPage),
+      getAdminAiLogs(token, defaultPage),
+      getMaintenanceMode(token),
+    ]);
+
+    setAdminData({
+      dashboard: dashboard.status === 'fulfilled' ? dashboard.value : null,
+      users: users.status === 'fulfilled' ? users.value : null,
+      schedules: schedulesResult.status === 'fulfilled' ? schedulesResult.value : null,
+      reports: reports.status === 'fulfilled' ? reports.value : null,
+      apiLogs: apiLogs.status === 'fulfilled' ? apiLogs.value : null,
+      aiLogs: aiLogs.status === 'fulfilled' ? aiLogs.value : null,
+      maintenance: maintenance.status === 'fulfilled' ? maintenance.value : null,
+      errors: [dashboard, users, schedulesResult, reports, apiLogs, aiLogs, maintenance]
+        .filter((result) => result.status === 'rejected')
+        .map((result) => result.reason?.message)
+        .filter(Boolean),
+    });
+  };
+
+  const handleSetMaintenanceMode = async (enabled) => {
+    const next = await runWithProtectedToken((token) => setMaintenanceMode(enabled, token));
+    setAdminData((previous) => ({ ...previous, maintenance: next }));
+    return next;
+  };
+
+  const handleSendAdminBroadcast = async (body) => {
+    return runWithProtectedToken((token) => sendAdminBroadcast(body, token));
+  };
+
+  const handleSendAdminEmail = async (body) => {
+    return runWithProtectedToken((token) => sendAdminEmail(body, token));
+  };
+
+  const handleSuspendAdminUser = async (id) => {
+    const result = await runWithProtectedToken((token) => suspendAdminUser(id, token));
+    await refreshAdminData();
+    return result;
+  };
+
+  const handleActivateAdminUser = async (id) => {
+    const result = await runWithProtectedToken((token) => activateAdminUser(id, token));
+    await refreshAdminData();
+    return result;
+  };
+
+  const handleReviewAdminReport = async (id, status) => {
+    const result = await runWithProtectedToken((token) => reviewAdminReport(id, status, token));
+    await refreshAdminData();
+    return result;
+  };
+
+  const handleRegisterFcmToken = async (fcmToken) => {
+    if (!fcmToken?.trim()) return null;
+    return runWithProtectedToken((token) => registerFcmToken(fcmToken.trim(), token));
+  };
+
+  const handleRunApiDiagnostics = async () => {
+    const checks = [
+      ['구독 플랜', (token) => getPlan(token), false],
+      ['일정 목록', (token) => getSchedules(token), false],
+      ['일정 초대', (token) => getScheduleInvitations(token), false],
+      ['친구 목록', (token) => getFriends(token), false],
+      ['친구 요청', (token) => getFriendRequests(token), false],
+      ['채팅방 목록', (token) => getChatRooms(token), false],
+      ['알림 목록', (token) => getNotifications(token), false],
+      ['읽지 않은 알림', (token) => getUnreadNotificationCount(token), false],
+      ['사용자 설정', (token) => getUserSettings(token), false, true],
+      ['관리자 대시보드', (token) => getAdminDashboard(token), true, true],
+      ['관리자 사용자', (token) => getAdminUsers(token, { page: 0, size: 1 }), true, true],
+    ];
+
+    const token = await getProtectedToken();
+    const results = [];
+
+    for (const [label, runner, adminOnly, permissionStatusAllowed] of checks) {
+      try {
+        const value = await runner(token);
+        const size = Array.isArray(value) ? value.length : Array.isArray(value?.content) ? value.content.length : null;
+        results.push({ label, status: 'ok', detail: size == null ? 'OK' : `${size}건`, adminOnly });
+      } catch (error) {
+        const permissionOnly = permissionStatusAllowed && [401, 403].includes(error?.status);
+        results.push({
+          label,
+          status: permissionOnly ? 'permission' : 'error',
+          detail: permissionOnly ? (adminOnly ? '관리자 권한 필요' : '백엔드 권한 설정 필요') : (error.message || `실패 (${error?.status || 0})`),
+          adminOnly,
+        });
+      }
+    }
+
+    setApiDiagnostics(results);
+    return results;
   };
 
   const handleFriendRequestAction = async (friendshipId, action) => {
@@ -911,6 +1180,11 @@ export default function App() {
     const sent = await runWithProtectedToken((token) => sendFriendRequest(targetUsername, token));
     await refreshFriendData();
     return sent;
+  };
+
+  const handleSearchUsers = async (q) => {
+    if (!q?.trim()) return [];
+    return toArray(await runWithProtectedToken((token) => searchUsers(q.trim().replace(/^@/, ''), token)));
   };
 
   const handleDeleteFriend = async (friendshipId) => {
@@ -1014,7 +1288,6 @@ export default function App() {
   };
 
   const content = useMemo(() => {
-    if (!fontsLoaded) return null;
     if (screen === 'intro') return <IntroScreen onNext={() => goTo('login')} />;
     if (screen === 'login') {
       return (
@@ -1032,7 +1305,7 @@ export default function App() {
     if (screen === 'onboardingSetup') return <KakaoConsentScreen busy={authBusy} error={authError} onboardingOnly onCancel={handleLogout} onOnboarding={handleOnboarding} session={session} />;
 
     if (screen === 'home') return <HomeScreen apiError={apiError} goTo={goTo} notificationCount={pendingInvitationCount} onNewSchedule={handleNewSchedule} onOpenSchedule={handleOpenSchedule} schedules={visibleSchedules} />;
-    if (screen === 'ai') return <AiInputScreen apiBusy={apiBusy} apiError={apiError} friends={friends} goTo={goTo} goBack={goBack} onParse={handleParseSchedule} />;
+    if (screen === 'ai') return <AiInputScreen apiBusy={apiBusy} apiError={apiError} friends={friends} goTo={goTo} goBack={goBack} onParse={handleParseSchedule} onParseVoice={handleParseVoiceSchedule} />;
     if (screen === 'aiReview') return <AiReviewScreen apiBusy={apiBusy} apiError={apiError} goTo={goTo} goBack={goBack} onCreate={handleCreateParsedSchedule} parsedSchedule={parsedSchedule} />;
     if (screen === 'schedule') {
       return (
@@ -1051,17 +1324,31 @@ export default function App() {
     }
     if (screen === 'chat') return <ChatListScreen apiError={apiError} goTo={goTo} onCreateRoom={handleCreateChatRoom} onOpenRoom={handleOpenChatRoom} rooms={chatRooms} />;
     if (screen === 'chatRoom') return <ChatRoomScreen goTo={goTo} goBack={goBack} messages={chatMessages} onCreateMediaUpload={handleCreateMediaUpload} onDeleteMessage={handleDeleteMessage} onReactMessage={handleReactMessage} room={selectedRoom} />;
-    if (screen === 'friends') return <FriendsScreen apiError={apiError} friendRequests={friendRequests} friends={friends} goTo={goTo} onBlockFriend={handleBlockFriend} onDeleteFriend={handleDeleteFriend} onOpenFriend={handleOpenFriendProfile} onRequestAction={handleFriendRequestAction} onSendRequest={handleSendFriendRequest} />;
+    if (screen === 'friends') return <FriendsScreen apiError={apiError} friendRequests={friendRequests} friends={friends} goTo={goTo} onBlockFriend={handleBlockFriend} onDeleteFriend={handleDeleteFriend} onOpenFriend={handleOpenFriendProfile} onRequestAction={handleFriendRequestAction} onSearchUsers={handleSearchUsers} onSendRequest={handleSendFriendRequest} />;
     if (screen === 'studyNote') return <StudyNoteScreen apiError={apiError} goBack={goBack} notes={studyNotes} onCreateNote={handleCreateStudyNote} onSummarizeNote={handleSummarizeStudyNote} schedule={selectedSchedule || visibleSchedules[0]} />;
-    if (screen === 'notices') return <NotificationsScreen apiBusy={apiBusy} apiError={apiError} goBack={goBack} invitations={scheduleInvitations} onInvitationAction={handleScheduleInvitationAction} />;
-    if (screen === 'admin') return <AdminScreen goBack={goBack} />;
+    if (screen === 'notices') return <NotificationsScreen apiBusy={apiBusy} apiError={apiError} goBack={goBack} invitations={scheduleInvitations} notifications={notifications} onInvitationAction={handleScheduleInvitationAction} onMarkAllRead={handleMarkAllNotificationsRead} onMarkRead={handleMarkNotificationRead} />;
+    if (screen === 'admin') return (
+      <AdminScreen
+        adminData={adminData}
+        goBack={goBack}
+        onActivateUser={handleActivateAdminUser}
+        onBroadcast={handleSendAdminBroadcast}
+        onEmail={handleSendAdminEmail}
+        onRefresh={refreshAdminData}
+        onRegisterFcmToken={handleRegisterFcmToken}
+        onReviewReport={handleReviewAdminReport}
+        onSetMaintenance={handleSetMaintenanceMode}
+        onSuspendUser={handleSuspendAdminUser}
+      />
+    );
     if (screen === 'profileEdit') return <ProfileEditScreen goBack={goBack} session={session} />;
-    if (screen === 'notificationSettings') return <NotificationSettingsScreen goBack={goBack} />;
+    if (screen === 'notificationSettings') return <NotificationSettingsScreen goBack={goBack} onUpdateSettings={handleUpdateUserSettings} settings={userSettings} />;
     if (screen === 'privacySettings') return <PrivacySettingsScreen goBack={goBack} />;
     if (screen === 'themeSettings') return <ThemeSettingsScreen goBack={goBack} />;
     if (screen === 'languageSettings') return <LanguageSettingsScreen goBack={goBack} />;
     if (screen === 'helpFaq') return <HelpFaqScreen goBack={goBack} />;
     if (screen === 'termsPrivacy') return <TermsPrivacyScreen goBack={goBack} />;
+    if (screen === 'apiDiagnostics') return <ApiDiagnosticsScreen goBack={goBack} onRun={handleRunApiDiagnostics} results={apiDiagnostics} />;
     if (screen === 'scheduleEdit') {
       return (
         <ScheduleEditScreen
@@ -1075,15 +1362,34 @@ export default function App() {
       );
     }
     if (screen === 'friendProfile') return <FriendProfileScreen apiError={apiError} friend={selectedFriend} goBack={goBack} onChat={handleStartDirectChat} />;
-    if (screen === 'chatSettings') return <ChatSettingsScreen goBack={goBack} />;
-    if (screen === 'chatSearch') return <ChatSearchScreen goBack={goBack} />;
-    return <ProfileScreen authError={authError} goTo={goTo} onLogout={handleLogout} onRefreshPlan={refreshPlan} plan={plan} session={session} />;
-  }, [screen, history, session, plan, authError, authNotice, authBusy, apiError, schedules, visibleSchedules, friends, friendRequests, scheduleInvitations, pendingInvitationCount, parsedSchedule, parsedScheduleInput, selectedFriend, selectedSchedule, studyNotes, chatRooms, selectedRoom, chatMessages, apiBusy, fontsLoaded, runWithProtectedToken]);
+    if (screen === 'chatSettings') return <ChatSettingsScreen goBack={goBack} room={selectedRoom} />;
+    if (screen === 'chatSearch') return <ChatSearchScreen goBack={goBack} messages={chatMessages} room={selectedRoom} />;
+    return (
+      <ProfileScreen
+        authError={authError}
+        goTo={goTo}
+        onLogout={handleLogout}
+        session={session}
+        stats={{
+          friends: friends.length,
+          schedules: visibleSchedules.length,
+          studyNotes: studyNotes.length,
+        }}
+      />
+    );
+  }, [screen, history, session, plan, authError, authNotice, authBusy, apiError, schedules, visibleSchedules, friends, friendRequests, scheduleInvitations, notifications, pendingInvitationCount, parsedSchedule, parsedScheduleInput, selectedFriend, selectedSchedule, studyNotes, chatRooms, selectedRoom, chatMessages, apiBusy, fontsLoaded, runWithProtectedToken, userSettings, adminData, apiDiagnostics]);
+
+  const isAuthenticated = Boolean(session?.accessToken && !session?.newUser && !['intro', 'login', 'kakaoConsent', 'onboardingSetup'].includes(screen));
 
   return (
-    <AppFrame>
+    <AppFrame
+      isAuthenticated={isAuthenticated}
+      onLogoPress={handleLogoPress}
+      pendingCount={pendingInvitationCount + unreadNotificationCount}
+      session={session}
+    >
       <View style={{ flex: 1 }}>
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, ...(Platform.OS === 'web' && tabScreens.has(screen) ? { marginLeft: 92 } : null) }}>
           {content}
         </View>
         {tabScreens.has(screen) ? <BottomTabs active={screen} onChange={switchTab} /> : null}

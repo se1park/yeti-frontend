@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { MessageCircle, UsersRound } from 'lucide-react-native';
+import { useRef, useState } from 'react';
+import { Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { MessageCircle, Mic, Square, UsersRound } from 'lucide-react-native';
 import { Avatar, Card, Pill, PrimaryButton, Screen, SecondaryButton, ToggleRow } from '../components/ui';
 import { BLUE, INK, LINE, MUTED, quickPrompts } from '../data/yetiData';
 
@@ -70,10 +70,15 @@ function normalizeFriend(friend, index) {
   };
 }
 
-export function AiInputScreen({ apiBusy, apiError, friends = [], goTo, goBack, onParse }) {
+export function AiInputScreen({ apiBusy, apiError, friends = [], goTo, goBack, onParse, onParseVoice }) {
   const [text, setText] = useState('');
   const [localError, setLocalError] = useState('');
+  const [recording, setRecording] = useState(false);
+  const [voiceNotice, setVoiceNotice] = useState('');
   const [selection, setSelection] = useState({ end: 0, start: 0 });
+  const audioChunksRef = useRef([]);
+  const mediaRecorderRef = useRef(null);
+  const mediaStreamRef = useRef(null);
   const mentionState = getMentionState(text, selection.end);
   const friendSuggestions = mentionState
     ? friends
@@ -114,6 +119,63 @@ export function AiInputScreen({ apiBusy, apiError, friends = [], goTo, goBack, o
     }
   };
 
+  const stopMediaTracks = () => {
+    mediaStreamRef.current?.getTracks?.().forEach((track) => track.stop());
+    mediaStreamRef.current = null;
+  };
+
+  const startVoiceRecording = async () => {
+    if (apiBusy || recording) return;
+    if (Platform.OS !== 'web' || !globalThis.navigator?.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setLocalError('현재 환경에서는 마이크 녹음을 사용할 수 없습니다.');
+      return;
+    }
+
+    try {
+      setLocalError('');
+      setVoiceNotice('말로 일정을 입력한 뒤 정지 버튼을 눌러주세요.');
+      const stream = await globalThis.navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      mediaStreamRef.current = stream;
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data?.size) audioChunksRef.current.push(event.data);
+      };
+      recorder.onstop = async () => {
+        stopMediaTracks();
+        setRecording(false);
+        const audio = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+        audioChunksRef.current = [];
+        if (!audio.size) {
+          setLocalError('녹음된 음성이 없습니다.');
+          return;
+        }
+
+        try {
+          setVoiceNotice('음성을 일정으로 정리하는 중입니다.');
+          await onParseVoice?.(audio);
+        } catch (error) {
+          setLocalError(error.message || '음성 일정 정리에 실패했습니다.');
+        } finally {
+          setVoiceNotice('');
+        }
+      };
+      recorder.start();
+      setRecording(true);
+    } catch (error) {
+      stopMediaTracks();
+      setRecording(false);
+      setLocalError(error.message || '마이크 권한을 확인해주세요.');
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    if (!recording || !mediaRecorderRef.current) return;
+    mediaRecorderRef.current.stop();
+  };
+
   return (
     <Screen
       left="×"
@@ -122,35 +184,59 @@ export function AiInputScreen({ apiBusy, apiError, friends = [], goTo, goBack, o
       subtitle="편하게 말하듯 적어주세요. AI가 정리해드릴게요."
       bottom={<PrimaryButton onPress={submit}>{apiBusy ? '정리 중...' : '정리하기'}</PrimaryButton>}
     >
-      <TextInput
-        multiline
-        onChangeText={setText}
-        onSelectionChange={(event) => setSelection(event.nativeEvent.selection)}
-        selection={selection}
-        value={text}
-        placeholder="예) 내일 오후 2시 지민이랑 강남에서 회의"
-        placeholderTextColor="#c6ccd7"
-        style={styles.input}
-        textAlignVertical="top"
-      />
-      {showMentionPicker ? (
-        <Card style={styles.mentionCard}>
-          <Text style={styles.mentionTitle}>친구 선택</Text>
-          {friendSuggestions.length ? friendSuggestions.map((friend) => (
-            <Pressable key={friend.id} onPress={() => insertMention(friend)} style={({ pressed }) => [styles.mentionRow, pressed && styles.mentionPressed]}>
-              <Avatar label={friend.initial} size={34} />
-              <View style={styles.mentionText}>
-                <Text numberOfLines={1} style={styles.mentionName}>{friend.nickname}</Text>
-                <Text numberOfLines={1} style={styles.mentionUsername}>@{friend.username}</Text>
-              </View>
-              <Text style={styles.mentionAdd}>추가</Text>
+      <View style={styles.aiInputGrid}>
+        <View style={styles.aiInputMain}>
+          <TextInput
+            multiline
+            onChangeText={setText}
+            onSelectionChange={(event) => setSelection(event.nativeEvent.selection)}
+            selection={selection}
+            value={text}
+            placeholder="예) 내일 오후 2시 지민이랑 강남에서 회의"
+            placeholderTextColor="#c6ccd7"
+            style={styles.input}
+            textAlignVertical="top"
+          />
+          <Card style={styles.voiceCard}>
+            <View style={styles.voiceText}>
+              <Text style={styles.voiceTitle}>말로 일정 추가</Text>
+              <Text style={styles.voiceDescription}>마이크로 말하면 STT와 AI 파싱으로 일정 초안을 만듭니다.</Text>
+            </View>
+            <Pressable
+              disabled={apiBusy}
+              onPress={recording ? stopVoiceRecording : startVoiceRecording}
+              style={({ pressed }) => [styles.voiceButton, recording && styles.voiceButtonRecording, pressed && styles.voiceButtonPressed]}
+            >
+              {recording ? <Square color="#ffffff" size={16} strokeWidth={2.6} /> : <Mic color="#ffffff" size={17} strokeWidth={2.6} />}
+              <Text style={styles.voiceButtonText}>{recording ? '정지' : '녹음'}</Text>
             </Pressable>
-          )) : (
-            <Text style={styles.mentionEmpty}>검색된 친구가 없습니다.</Text>
-          )}
+          </Card>
+          {voiceNotice ? <Text style={styles.voiceNotice}>{voiceNotice}</Text> : null}
+          {showMentionPicker ? (
+            <Card style={styles.mentionCard}>
+              <Text style={styles.mentionTitle}>친구 선택</Text>
+              {friendSuggestions.length ? friendSuggestions.map((friend) => (
+                <Pressable key={friend.id} onPress={() => insertMention(friend)} style={({ pressed }) => [styles.mentionRow, pressed && styles.mentionPressed]}>
+                  <Avatar label={friend.initial} size={34} />
+                  <View style={styles.mentionText}>
+                    <Text numberOfLines={1} style={styles.mentionName}>{friend.nickname}</Text>
+                    <Text numberOfLines={1} style={styles.mentionUsername}>@{friend.username}</Text>
+                  </View>
+                  <Text style={styles.mentionAdd}>추가</Text>
+                </Pressable>
+              )) : (
+                <Text style={styles.mentionEmpty}>검색된 친구가 없습니다.</Text>
+              )}
+            </Card>
+          ) : null}
+          {localError || apiError ? <Text style={styles.errorText}>{localError || apiError}</Text> : null}
+        </View>
+        <Card style={styles.aiInputGuide}>
+          <Text style={styles.guideTitle}>데스크톱 빠른 작성</Text>
+          <Text style={styles.guideText}>@를 입력하면 친구 목록이 뜹니다. 반복 일정은 “매주 금요일”처럼 요일을 함께 적으면 캘린더에 반복 표시됩니다.</Text>
+          <Text style={styles.guideMeta}>친구 {friends.length}명 · 자연어 파싱</Text>
         </Card>
-      ) : null}
-      {localError || apiError ? <Text style={styles.errorText}>{localError || apiError}</Text> : null}
+      </View>
       <Text style={styles.promptTitle}>이렇게 적으면 좋아요</Text>
       <View style={styles.promptWrap}>
         {quickPrompts.map((prompt) => (
@@ -193,36 +279,42 @@ export function AiReviewScreen({ apiBusy, apiError, goTo, goBack, onCreate, pars
         right={result ? <Text style={styles.confidence}>✦ 신뢰도 {confidence}%</Text> : null}
         bottom={result ? (
           <View style={styles.bottomButtons}>
-            <SecondaryButton>수정</SecondaryButton>
+            <SecondaryButton onPress={goBack}>수정</SecondaryButton>
             <PrimaryButton style={styles.primaryGrow} onPress={submit}>{apiBusy ? '등록 중...' : '일정 등록하기'}</PrimaryButton>
           </View>
         ) : null}
       >
         {result ? (
           <>
-            <View style={styles.typedBox}>
-              <Text style={styles.typedText}><Text style={styles.blue}>{result.title}</Text> 일정이 정리됐어요.</Text>
-            </View>
-            {localError || apiError ? <Text style={styles.errorText}>{localError || apiError}</Text> : null}
-            {result.clarificationRequired ? (
-              <Text style={styles.warningText}>AI가 일부 내용을 확신하지 못했어요. 등록 전에 일정 정보를 확인해주세요.</Text>
-            ) : null}
-            <Text style={styles.aiLabel}>✦ AI가 정리한 일정</Text>
-            <Card style={styles.resultCard}>
-              <Pill>{result.category || '일정'}</Pill>
-              <Text style={styles.resultTitle}>{result.title || '제목 없는 일정'}</Text>
-              <Text style={styles.resultLine}>◷  일시   {formatScheduleDateLine(result)}</Text>
-              <Text style={styles.resultLine}>⌖  장소   {result.location || '-'}</Text>
-              <View style={styles.resultLineWithIcon}>
-                <UsersRound color={MUTED} size={15} strokeWidth={2.3} />
-                <Text style={styles.resultLine}>참여   나{participantText} <Text style={styles.invite}>초대 전송 예정</Text></Text>
+            <View style={styles.reviewGrid}>
+              <View style={styles.reviewMain}>
+                <View style={styles.typedBox}>
+                  <Text style={styles.typedText}><Text style={styles.blue}>{result.title}</Text> 일정이 정리됐어요.</Text>
+                </View>
+                {localError || apiError ? <Text style={styles.errorText}>{localError || apiError}</Text> : null}
+                {result.clarificationRequired ? (
+                  <Text style={styles.warningText}>AI가 일부 내용을 확신하지 못했어요. 등록 전에 일정 정보를 확인해주세요.</Text>
+                ) : null}
+                <Text style={styles.aiLabel}>✦ AI가 정리한 일정</Text>
+                <Card style={styles.resultCard}>
+                  <Pill>{result.category || '일정'}</Pill>
+                  <Text style={styles.resultTitle}>{result.title || '제목 없는 일정'}</Text>
+                  <Text style={styles.resultLine}>◷  일시   {formatScheduleDateLine(result)}</Text>
+                  <Text style={styles.resultLine}>⌖  장소   {result.location || '-'}</Text>
+                  <View style={styles.resultLineWithIcon}>
+                    <UsersRound color={MUTED} size={15} strokeWidth={2.3} />
+                    <Text style={styles.resultLine}>참여   나{participantText} <Text style={styles.invite}>초대 전송 예정</Text></Text>
+                  </View>
+                </Card>
               </View>
-            </Card>
-            <Card style={styles.toggleCard}>
-              <ToggleRow label="채팅방 자동 생성" enabled />
-              <ToggleRow label="15분 전 알림" enabled />
-              <ToggleRow label="매주 반복" enabled={Boolean(result.recurring || result.recurrenceRule)} />
-            </Card>
+              <Card style={styles.reviewSide}>
+                <Text style={styles.guideTitle}>등록 전 확인</Text>
+                <ToggleRow label="채팅방 자동 생성" enabled />
+                <ToggleRow label="15분 전 알림" enabled />
+                <ToggleRow label="매주 반복" enabled={Boolean(result.recurring || result.recurrenceRule)} />
+                <Text style={styles.guideMeta}>신뢰도 {confidence}%</Text>
+              </Card>
+            </View>
           </>
         ) : (
           <Card style={styles.emptyCard}>
@@ -296,6 +388,87 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     minHeight: 118,
     padding: 14,
+  },
+  voiceCard: {
+    alignItems: 'center',
+    borderColor: '#d8e6ff',
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 10,
+    padding: 12,
+  },
+  voiceText: {
+    flex: 1,
+  },
+  voiceTitle: {
+    color: INK,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  voiceDescription: {
+    color: MUTED,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
+    marginTop: 3,
+  },
+  voiceButton: {
+    alignItems: 'center',
+    backgroundColor: BLUE,
+    borderRadius: 14,
+    flexDirection: 'row',
+    gap: 6,
+    justifyContent: 'center',
+    minWidth: 86,
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+  },
+  voiceButtonRecording: {
+    backgroundColor: '#f04454',
+  },
+  voiceButtonPressed: {
+    opacity: 0.72,
+  },
+  voiceButtonText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  voiceNotice: {
+    color: BLUE,
+    fontSize: 12,
+    fontWeight: '800',
+    marginTop: 8,
+  },
+  aiInputGrid: {
+    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+    gap: Platform.OS === 'web' ? 18 : 0,
+  },
+  aiInputMain: {
+    flex: Platform.OS === 'web' ? 1.3 : undefined,
+    minWidth: Platform.OS === 'web' ? 420 : undefined,
+  },
+  aiInputGuide: {
+    flex: Platform.OS === 'web' ? 0.75 : undefined,
+    minWidth: Platform.OS === 'web' ? 300 : undefined,
+  },
+  guideTitle: {
+    color: INK,
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  guideText: {
+    color: MUTED,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 20,
+    marginTop: 9,
+  },
+  guideMeta: {
+    color: BLUE,
+    fontSize: 12,
+    fontWeight: '900',
+    marginTop: 14,
   },
   promptTitle: {
     color: '#9aa4b5',
@@ -419,6 +592,19 @@ const styles = StyleSheet.create({
   },
   resultCard: {
     marginBottom: 12,
+  },
+  reviewGrid: {
+    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+    gap: Platform.OS === 'web' ? 18 : 0,
+  },
+  reviewMain: {
+    flex: Platform.OS === 'web' ? 1.15 : undefined,
+    minWidth: Platform.OS === 'web' ? 420 : undefined,
+  },
+  reviewSide: {
+    flex: Platform.OS === 'web' ? 0.85 : undefined,
+    minWidth: Platform.OS === 'web' ? 300 : undefined,
+    paddingVertical: 4,
   },
   resultTitle: {
     color: INK,

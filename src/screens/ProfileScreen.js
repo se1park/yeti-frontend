@@ -1,5 +1,5 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Bell, BookOpen, ChevronRight, Globe2, HelpCircle, LockKeyhole, LogOut, Palette, UserRound } from 'lucide-react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Bell, BookOpen, ChevronRight, Globe2, HelpCircle, LockKeyhole, LogOut, Palette, ServerCog, UserRound } from 'lucide-react-native';
 import { Avatar, Card, Screen } from '../components/ui';
 import { BLUE, INK, LINE, MUTED } from '../data/yetiData';
 
@@ -15,7 +15,7 @@ function getDisplayName(user) {
   return user.nickname || user.nickName || user.displayName || user.display_name || user.name || getUsername(user) || '사용자';
 }
 
-export function ProfileScreen({ authError, goTo, onLogout, session }) {
+export function ProfileScreen({ authError, goTo, onLogout, session, stats = {} }) {
   const user = session?.user || {};
   const nickname = getDisplayName(user);
   const username = getUsername(user);
@@ -24,42 +24,55 @@ export function ProfileScreen({ authError, goTo, onLogout, session }) {
   return (
     <View style={styles.flex}>
       <Screen noHeader tabInset>
-        <View style={styles.profileHero}>
-          <Avatar label={nickname.slice(0, 2).toUpperCase()} color={BLUE} size={64} />
-          <View style={styles.profileText}>
-            <Text numberOfLines={1} style={styles.name}>
-              {nickname}
-              {showHandle ? <Text style={styles.handle}> @{username}</Text> : null}
-            </Text>
-            <Text style={styles.status}>약속을 한 번에 끝내고 싶다</Text>
+        <View style={styles.profileGrid}>
+          <View style={styles.profileColumn}>
+            <View style={styles.profileHero}>
+              <Avatar label={nickname.slice(0, 2).toUpperCase()} color={BLUE} size={64} />
+              <View style={styles.profileText}>
+                <Text numberOfLines={1} style={styles.name}>
+                  {nickname}
+                  {showHandle ? <Text style={styles.handle}> @{username}</Text> : null}
+                </Text>
+                <Text style={styles.status}>약속을 한 번에 끝내고 싶다</Text>
+              </View>
+              <Text style={styles.chevron}>›</Text>
+            </View>
+
+            {authError ? <Text style={styles.errorText}>{authError}</Text> : null}
+
+            <View style={styles.summaryRow}>
+              <Stat value={stats.schedules ?? '-'} label="이번 달 일정" />
+              <Stat value={stats.friends ?? '-'} label="친구" />
+              <Stat value={stats.studyNotes ?? '-'} label="학습 노트" />
+            </View>
+
+            <Card style={styles.desktopInfoCard}>
+              <Text style={styles.desktopInfoTitle}>계정 정보</Text>
+              <Text style={styles.desktopInfoText}>로그인한 사용자 정보를 기준으로 프로필과 환경 설정을 관리합니다.</Text>
+              <Text style={styles.desktopInfoHandle}>{username ? `@${username}` : 'username 미설정'}</Text>
+            </Card>
           </View>
-          <Text style={styles.chevron}>›</Text>
+
+          <View style={styles.settingsColumn}>
+            <Text style={styles.sectionLabel}>환경설정</Text>
+            <Card style={styles.menuCard}>
+              <Menu Icon={UserRound} label="프로필 편집" value={username ? `@${username}` : ''} onPress={() => goTo('profileEdit')} />
+              <Menu Icon={Bell} label="알림 설정" value="15분 전" onPress={() => goTo('notificationSettings')} />
+              <Menu Icon={LockKeyhole} label="공개 범위" value="친구 공개" onPress={() => goTo('privacySettings')} />
+              <Menu Icon={Palette} label="테마" value="시스템" onPress={() => goTo('themeSettings')} />
+              <Menu Icon={Globe2} label="언어" value="한국어" onPress={() => goTo('languageSettings')} />
+              <Menu Icon={HelpCircle} label="고객센터 · FAQ" value="" onPress={() => goTo('helpFaq')} />
+              <Menu Icon={LockKeyhole} label="이용약관 · 개인정보" value="" onPress={() => goTo('termsPrivacy')} />
+              <Menu Icon={ServerCog} label="API 연결 진단" value="현재 세션" onPress={() => goTo('apiDiagnostics')} />
+              <Menu Icon={BookOpen} label="학습 노트" value={stats.studyNotes !== undefined ? `${stats.studyNotes}개` : ''} onPress={() => goTo('studyNote')} />
+            </Card>
+
+            <Pressable onPress={onLogout} style={styles.logoutBottom}>
+              <LogOut color="#f04454" size={17} strokeWidth={2.5} />
+              <Text style={styles.logoutBottomText}>로그아웃</Text>
+            </Pressable>
+          </View>
         </View>
-
-        {authError ? <Text style={styles.errorText}>{authError}</Text> : null}
-
-        <View style={styles.summaryRow}>
-          <Stat value="12" label="이번 달 일정" />
-          <Stat value="8" label="친구" />
-          <Stat value="24" label="학습 노트" />
-        </View>
-
-        <Text style={styles.sectionLabel}>환경설정</Text>
-        <Card style={styles.menuCard}>
-          <Menu Icon={UserRound} label="프로필 편집" value={username ? `@${username}` : ''} onPress={() => goTo('profileEdit')} />
-          <Menu Icon={Bell} label="알림 설정" value="15분 전" onPress={() => goTo('notificationSettings')} />
-          <Menu Icon={LockKeyhole} label="공개 범위" value="친구 공개" onPress={() => goTo('privacySettings')} />
-          <Menu Icon={Palette} label="테마" value="시스템" onPress={() => goTo('themeSettings')} />
-          <Menu Icon={Globe2} label="언어" value="한국어" onPress={() => goTo('languageSettings')} />
-          <Menu Icon={HelpCircle} label="고객센터 · FAQ" value="" onPress={() => goTo('helpFaq')} />
-          <Menu Icon={LockKeyhole} label="이용약관 · 개인정보" value="" onPress={() => goTo('termsPrivacy')} />
-          <Menu Icon={BookOpen} label="학습 노트" value="24개" onPress={() => goTo('studyNote')} />
-        </Card>
-
-        <Pressable onPress={onLogout} style={styles.logoutBottom}>
-          <LogOut color="#f04454" size={17} strokeWidth={2.5} />
-          <Text style={styles.logoutBottomText}>로그아웃</Text>
-        </Pressable>
       </Screen>
     </View>
   );
@@ -93,6 +106,18 @@ function Menu({ Icon, label, value, onPress }) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  profileGrid: {
+    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+    gap: Platform.OS === 'web' ? 18 : 0,
+  },
+  profileColumn: {
+    flex: Platform.OS === 'web' ? 0.9 : undefined,
+    minWidth: Platform.OS === 'web' ? 320 : undefined,
+  },
+  settingsColumn: {
+    flex: Platform.OS === 'web' ? 1.2 : undefined,
+    minWidth: Platform.OS === 'web' ? 420 : undefined,
+  },
   profileHero: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -121,6 +146,27 @@ const styles = StyleSheet.create({
   },
   statValue: { color: INK, fontSize: 25, fontWeight: '900', lineHeight: 30 },
   statLabel: { color: '#8a94a6', fontSize: 11, fontWeight: '900', marginTop: 6 },
+  desktopInfoCard: {
+    display: Platform.OS === 'web' ? 'flex' : 'none',
+  },
+  desktopInfoTitle: {
+    color: INK,
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  desktopInfoText: {
+    color: MUTED,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 20,
+    marginTop: 8,
+  },
+  desktopInfoHandle: {
+    color: BLUE,
+    fontSize: 13,
+    fontWeight: '900',
+    marginTop: 14,
+  },
   sectionLabel: { color: '#8a94a6', fontSize: 12, fontWeight: '900', marginBottom: 10 },
   menuCard: { paddingHorizontal: 18, paddingVertical: 0 },
   menu: {

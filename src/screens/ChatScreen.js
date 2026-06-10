@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Plus, Search } from 'lucide-react-native';
 import { Avatar, Card, Pill, PrimaryButton, Screen } from '../components/ui';
 import { BLUE, INK, LINE, MUTED } from '../data/yetiData';
@@ -40,31 +40,49 @@ export function ChatListScreen({ apiError, goTo, onCreateRoom, onOpenRoom, rooms
             <Text key={item} style={[styles.segmentItem, index === 0 && styles.segmentActive]}>{item}</Text>
           ))}
         </View>
-        {apiError ? <Text style={styles.errorText}>{apiError}</Text> : null}
-        {displayRooms.length ? displayRooms.map((room, index) => (
-          <Pressable key={room.id} onPress={() => onOpenRoom?.(room.raw)}>
-            <View style={styles.roomRow}>
-              <StackedAvatars avatars={room.avatars} title={room.title} />
-              <View style={styles.roomText}>
-                <View style={styles.roomTitleRow}>
-                  <Text style={styles.roomTitle}>{room.title}</Text>
-                  {room.chip ? <Pill tone="yellow">{room.chip}</Pill> : null}
+        <View style={styles.chatGrid}>
+          <View style={styles.roomListPanel}>
+            {apiError ? <Text style={styles.errorText}>{apiError}</Text> : null}
+            {displayRooms.length ? displayRooms.map((room, index) => (
+              <Pressable key={room.id} onPress={() => onOpenRoom?.(room.raw)}>
+                <View style={styles.roomRow}>
+                  <StackedAvatars avatars={room.avatars} title={room.title} />
+                  <View style={styles.roomText}>
+                    <View style={styles.roomTitleRow}>
+                      <Text style={styles.roomTitle}>{room.title}</Text>
+                      {room.chip ? <Pill tone="yellow">{room.chip}</Pill> : null}
+                    </View>
+                    <Text numberOfLines={1} style={styles.preview}>{room.preview}</Text>
+                  </View>
+                  <View style={styles.roomSide}>
+                    <Text style={styles.time}>{room.time}</Text>
+                    {room.unread ? <Text style={styles.unread}>{room.unread}</Text> : null}
+                  </View>
                 </View>
-                <Text numberOfLines={1} style={styles.preview}>{room.preview}</Text>
+                {index < displayRooms.length - 1 ? <View style={styles.divider} /> : null}
+              </Pressable>
+            )) : (
+              <Card style={styles.emptyCard}>
+                <Text style={styles.emptyTitle}>채팅방이 없습니다</Text>
+                <Text style={styles.emptyText}>오른쪽 + 버튼으로 친구 username을 입력해 채팅방을 만드세요.</Text>
+              </Card>
+            )}
+          </View>
+          <Card style={styles.chatPreviewPanel}>
+            <Text style={styles.previewPanelTitle}>대화를 선택하세요</Text>
+            <Text style={styles.previewPanelText}>친구와 만든 일정, 초대, 학습 노트 대화를 한 화면에서 확인할 수 있도록 웹앱 레이아웃을 넓혔습니다.</Text>
+            <View style={styles.previewPanelMetricRow}>
+              <View style={styles.previewPanelMetric}>
+                <Text style={styles.previewPanelMetricValue}>{displayRooms.length}</Text>
+                <Text style={styles.previewPanelMetricLabel}>채팅방</Text>
               </View>
-              <View style={styles.roomSide}>
-                <Text style={styles.time}>{room.time}</Text>
-                {room.unread ? <Text style={styles.unread}>{room.unread}</Text> : null}
+              <View style={styles.previewPanelMetric}>
+                <Text style={styles.previewPanelMetricValue}>{displayRooms.reduce((sum, room) => sum + Number(room.unread || 0), 0)}</Text>
+                <Text style={styles.previewPanelMetricLabel}>읽지 않음</Text>
               </View>
             </View>
-            {index < displayRooms.length - 1 ? <View style={styles.divider} /> : null}
-          </Pressable>
-        )) : (
-          <Card style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>채팅방이 없습니다</Text>
-            <Text style={styles.emptyText}>오른쪽 + 버튼으로 친구 username을 입력해 채팅방을 만드세요.</Text>
           </Card>
-        )}
+        </View>
       </Screen>
       <RoomCreateSheet onCreateRoom={onCreateRoom} visible={createVisible} onClose={() => setCreateVisible(false)} />
     </View>
@@ -144,7 +162,12 @@ function RoomCreateSheet({ visible, onClose, onCreateRoom }) {
     <Modal transparent visible={visible} animationType="slide">
       <View style={styles.modalBackdrop}>
         <View style={styles.sheet}>
-          <Text style={styles.sheetTitle}>채팅방 만들기</Text>
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>채팅방 만들기</Text>
+            <Pressable hitSlop={10} onPress={onClose} style={styles.sheetClose}>
+              <Text style={styles.sheetCloseText}>×</Text>
+            </Pressable>
+          </View>
           <TextInput value={name} onChangeText={setName} placeholder="방 이름" placeholderTextColor="#a0a8b5" style={styles.sheetInput} />
           <TextInput value={members} onChangeText={setMembers} placeholder="username, username" placeholderTextColor="#a0a8b5" style={styles.sheetInput} />
           {message ? <Text style={styles.errorText}>{message}</Text> : null}
@@ -188,6 +211,15 @@ const styles = StyleSheet.create({
   segmentItem: { backgroundColor: '#f4f6f8', borderRadius: 16, color: '#667085', fontSize: 12, fontWeight: '900', overflow: 'hidden', paddingHorizontal: 12, paddingVertical: 8 },
   segmentActive: { backgroundColor: INK, color: '#ffffff' },
   errorText: { color: '#f04454', fontSize: 12, fontWeight: '800', marginBottom: 10 },
+  chatGrid: { flexDirection: Platform.OS === 'web' ? 'row' : 'column', gap: Platform.OS === 'web' ? 18 : 0 },
+  roomListPanel: { flex: Platform.OS === 'web' ? 1.1 : undefined, minWidth: Platform.OS === 'web' ? 360 : undefined },
+  chatPreviewPanel: { display: Platform.OS === 'web' ? 'flex' : 'none', flex: 0.9, justifyContent: 'space-between', minHeight: 260, minWidth: 320 },
+  previewPanelTitle: { color: INK, fontSize: 22, fontWeight: '900' },
+  previewPanelText: { color: MUTED, fontSize: 13, fontWeight: '700', lineHeight: 20, marginTop: 10 },
+  previewPanelMetricRow: { flexDirection: 'row', gap: 10, marginTop: 20 },
+  previewPanelMetric: { backgroundColor: '#f4f6f8', borderRadius: 14, flex: 1, padding: 14 },
+  previewPanelMetricValue: { color: INK, fontSize: 26, fontWeight: '900' },
+  previewPanelMetricLabel: { color: MUTED, fontSize: 12, fontWeight: '900', marginTop: 4 },
   roomRow: { alignItems: 'center', flexDirection: 'row', gap: 12, minHeight: 62 },
   avatarCluster: { height: 48, position: 'relative', width: 58 },
   avatarBubble: { backgroundColor: '#ffffff', borderColor: '#ffffff', borderRadius: 999, borderWidth: 2, position: 'absolute' },
@@ -216,8 +248,11 @@ const styles = StyleSheet.create({
   chatInput: { alignItems: 'center', backgroundColor: '#f4f6f8', borderRadius: 20, flexDirection: 'row', gap: 10, paddingLeft: 16, paddingRight: 4, paddingVertical: 4 },
   chatInputText: { color: '#a0a8b5', flex: 1, fontSize: 13, fontWeight: '700' },
   sendButton: { height: 38, width: 78 },
-  modalBackdrop: { backgroundColor: 'rgba(17, 24, 39, 0.48)', flex: 1, justifyContent: 'flex-end' },
-  sheet: { backgroundColor: '#ffffff', borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 18, paddingBottom: 30 },
-  sheetTitle: { color: INK, fontSize: 19, fontWeight: '900', marginBottom: 12 },
+  modalBackdrop: { alignItems: Platform.OS === 'web' ? 'center' : 'stretch', backgroundColor: 'rgba(17, 24, 39, 0.48)', flex: 1, justifyContent: Platform.OS === 'web' ? 'center' : 'flex-end', padding: Platform.OS === 'web' ? 24 : 0 },
+  sheet: { backgroundColor: '#ffffff', borderRadius: Platform.OS === 'web' ? 18 : 0, borderTopLeftRadius: 18, borderTopRightRadius: 18, maxWidth: Platform.OS === 'web' ? 460 : undefined, padding: 18, paddingBottom: 30, width: '100%' },
+  sheetHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
+  sheetTitle: { color: INK, fontSize: 19, fontWeight: '900' },
+  sheetClose: { alignItems: 'center', height: 34, justifyContent: 'center', width: 34 },
+  sheetCloseText: { color: INK, fontSize: 24, fontWeight: '800', lineHeight: 28 },
   sheetInput: { borderColor: BLUE, borderRadius: 9, borderWidth: 1.5, color: INK, fontSize: 14, fontWeight: '800', height: 46, marginBottom: 12, paddingHorizontal: 14 },
 });

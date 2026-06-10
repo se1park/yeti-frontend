@@ -1,10 +1,9 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Bot, Home, MessageCircle, UserRound, UsersRound } from 'lucide-react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Home, MessageCircle, UserRound, UsersRound } from 'lucide-react-native';
 import { BLUE, INK, MUTED } from '../data/yetiData';
 
 const tabs = [
   { key: 'home', label: '홈', Icon: Home },
-  { key: 'ai', label: 'AI', Icon: Bot },
   { key: 'chat', label: '채팅', Icon: MessageCircle },
   { key: 'friends', label: '친구', Icon: UsersRound },
   { key: 'my', label: '마이', Icon: UserRound },
@@ -37,22 +36,32 @@ const styles = StyleSheet.create({
   wrap: {
     alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.98)',
-    borderTopColor: '#edf0f4',
-    borderTopWidth: 1,
-    bottom: 0,
-    flexDirection: 'row',
-    height: 84,
-    justifyContent: 'space-around',
+    borderRightColor: Platform.OS === 'web' ? '#edf0f4' : undefined,
+    borderRightWidth: Platform.OS === 'web' ? 1 : 0,
+    borderTopColor: Platform.OS === 'web' ? undefined : '#edf0f4',
+    borderTopWidth: Platform.OS === 'web' ? 0 : 1,
+    bottom: Platform.OS === 'web' ? 0 : 0,
+    flexDirection: Platform.OS === 'web' ? 'column' : 'row',
+    gap: Platform.OS === 'web' ? 8 : 0,
+    height: Platform.OS === 'web' ? '100%' : 84,
+    justifyContent: Platform.OS === 'web' ? 'flex-start' : 'space-around',
     left: 0,
-    paddingBottom: 15,
-    paddingHorizontal: 10,
+    paddingBottom: Platform.OS === 'web' ? 18 : 15,
+    paddingHorizontal: Platform.OS === 'web' ? 12 : 10,
+    paddingTop: Platform.OS === 'web' ? 22 : 0,
     position: 'absolute',
-    right: 0,
+    right: Platform.OS === 'web' ? undefined : 0,
+    top: Platform.OS === 'web' ? 0 : undefined,
+    width: Platform.OS === 'web' ? 92 : undefined,
   },
   item: {
     alignItems: 'center',
-    flex: 1,
+    borderRadius: Platform.OS === 'web' ? 16 : 0,
+    flex: Platform.OS === 'web' ? 0 : 1,
     gap: 4,
+    minHeight: Platform.OS === 'web' ? 68 : undefined,
+    paddingVertical: Platform.OS === 'web' ? 8 : 0,
+    width: '100%',
   },
   itemPressed: {
     opacity: 0.72,
@@ -81,7 +90,7 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     bottom: 5,
     height: 4,
-    opacity: 0.16,
+    opacity: Platform.OS === 'web' ? 0 : 0.16,
     position: 'absolute',
     width: 112,
   },
