@@ -14,6 +14,12 @@ function userKeys(user) {
   ].filter(Boolean).map((value) => String(value).replace(/^@/, '').toLowerCase());
 }
 
+function isGenericChatRoomName(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return !normalized
+    || ['채팅방', '채팅창', 'chat', 'chatroom', 'chat room', 'direct', 'dm', '대화방'].includes(normalized);
+}
+
 function isCurrentUserMessage(message, currentUser) {
   const keys = userKeys(currentUser);
   if (!keys.length) return false;
@@ -28,17 +34,23 @@ function isCurrentUserMessage(message, currentUser) {
 
 function getRoomMembers(room) {
   return [
+    room?.directUser,
+    room?.friend,
+    room?.peer,
+    room?.targetUser,
+    room?.recipient,
+    room?.otherUser,
     ...(Array.isArray(room?.members) ? room.members : []),
     ...(Array.isArray(room?.participants) ? room.participants : []),
     ...(Array.isArray(room?.users) ? room.users : []),
-  ];
+  ].filter(Boolean);
 }
 
 function getPeerFromRoom(room, currentUser) {
   const keys = userKeys(currentUser);
   const directPeer = {
-    nickname: room?.directNickname || room?.friendNickname || '',
-    username: room?.directUsername || room?.friendUsername || '',
+    nickname: room?.directNickname || room?.friendNickname || room?.peerNickname || room?.targetNickname || room?.recipientNickname || room?.otherNickname || '',
+    username: room?.directUsername || room?.friendUsername || room?.peerUsername || room?.targetUsername || room?.recipientUsername || room?.otherUsername || '',
     profileImageUrl: room?.directProfileImageUrl || room?.friendProfileImageUrl || '',
   };
   if (directPeer.nickname || directPeer.username) return directPeer;
@@ -50,7 +62,7 @@ function getPeerFromRoom(room, currentUser) {
 }
 
 function getPeerName(peer) {
-  return peer?.username || peer?.nickname || peer?.name || peer?.displayName || '';
+  return peer?.username || peer?.userName || peer?.handle || peer?.nickname || peer?.name || peer?.displayName || '';
 }
 
 function getAvatarLabel(value) {
@@ -61,10 +73,11 @@ function getAvatarLabel(value) {
 function normalizeRoom(room, index, currentUser) {
   const peer = getPeerFromRoom(room, currentUser);
   const peerName = getPeerName(peer);
-  const serverName = room.name && room.name !== '채팅방' ? room.name : '';
+  const serverName = !isGenericChatRoomName(room.name) ? room.name : '';
   const directTitle = room.directUsername || room.friendUsername || peerName;
-  const title = directTitle || room.displayName || room.directNickname || serverName || '채팅방';
-  const username = room.directUsername || room.friendUsername || peer?.username || '';
+  const displayName = !isGenericChatRoomName(room.displayName) ? room.displayName : '';
+  const title = directTitle || displayName || room.directNickname || serverName || '채팅방';
+  const username = room.directUsername || room.friendUsername || room.peerUsername || room.targetUsername || room.recipientUsername || room.otherUsername || peer?.username || peer?.userName || '';
   return {
     id: room.id || `${room.name}-${index}`,
     title,
@@ -164,7 +177,7 @@ export function ChatRoomScreen({ chatStatus, currentUser, goTo, goBack, messages
   const [draft, setDraft] = useState('');
   const peer = getPeerFromRoom(room, currentUser);
   const peerName = getPeerName(peer);
-  const roomTitle = room?.directUsername || peer?.username || peerName || room?.displayName || room?.directNickname || (room?.name !== '채팅방' ? room?.name : '') || '채팅방';
+  const roomTitle = room?.directUsername || peer?.username || peer?.userName || peerName || (!isGenericChatRoomName(room?.displayName) ? room?.displayName : '') || room?.directNickname || (!isGenericChatRoomName(room?.name) ? room?.name : '') || '채팅방';
   const roomSubtitle = room?.directUsername || peer?.username ? `@${room.directUsername || peer.username}` : room?.type || '';
   const connected = chatStatus?.status === 'connected';
   const statusLabel = {

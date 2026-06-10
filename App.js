@@ -370,15 +370,50 @@ function normalizeFriendUsername(value) {
   return String(value || '').trim().replace(/^@/, '').toLowerCase();
 }
 
+function isGenericChatRoomName(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return !normalized
+    || ['채팅방', '채팅창', 'chat', 'chatroom', 'chat room', 'direct', 'dm', '대화방'].includes(normalized);
+}
+
+function readRoomPersonUsername(value) {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  return value.username
+    || value.userName
+    || value.handle
+    || value.memberUsername
+    || value.nickname
+    || value.name
+    || '';
+}
+
 function normalizeChatRoomValue(room, index = 0) {
   if (!room || typeof room !== 'object') return null;
   const id = room.id || room.roomId || room.chatRoomId || room.uuid;
   const memberCount = Number(room.memberCount ?? room.membersCount ?? room.member_count ?? 0);
-  const fallbackName = room.directNickname || room.friendNickname || room.directUsername || room.friendUsername || room.title || '채팅방';
+  const fallbackName = room.directNickname
+    || room.friendNickname
+    || room.peerNickname
+    || room.targetNickname
+    || room.recipientNickname
+    || room.otherNickname
+    || room.directUsername
+    || room.friendUsername
+    || room.peerUsername
+    || room.targetUsername
+    || room.recipientUsername
+    || room.otherUsername
+    || (!isGenericChatRoomName(room.title) ? room.title : '')
+    || '채팅방';
   return {
     ...room,
     id: id || `${room.name || 'room'}-${index}`,
-    displayName: room.displayName || (room.name && room.name !== '채팅방' ? room.name : fallbackName),
+    displayName: !isGenericChatRoomName(room.displayName)
+      ? room.displayName
+      : !isGenericChatRoomName(room.name)
+        ? room.name
+        : fallbackName,
     memberCount,
     name: room.name || fallbackName,
     thumbnailUrl: room.thumbnailUrl || room.thumbnailURL || room.imageUrl || '',
@@ -392,7 +427,7 @@ function enrichDirectChatRoom(room, friend) {
   if (!normalized) return null;
   const username = getFriendUsername(friend);
   const nickname = friend?.nickname || friend?.name || username;
-  const isGenericName = !normalized.name || normalized.name === '채팅방';
+  const isGenericName = isGenericChatRoomName(normalized.name);
   return {
     ...normalized,
     directNickname: nickname,
@@ -407,23 +442,36 @@ function enrichDirectChatRoom(room, friend) {
 
 function getRoomParticipantUsernames(room) {
   const values = [
+    room?.directUsername,
+    room?.friendUsername,
+    room?.peerUsername,
+    room?.targetUsername,
+    room?.recipientUsername,
+    room?.otherUsername,
+    room?.memberUsername,
+    room?.participantUsername,
+    room?.userUsername,
+    room?.directUser,
+    room?.friend,
+    room?.peer,
+    room?.targetUser,
+    room?.recipient,
+    room?.otherUser,
     ...(Array.isArray(room?.memberUsernames) ? room.memberUsernames : []),
     ...(Array.isArray(room?.participantUsernames) ? room.participantUsernames : []),
+    ...(Array.isArray(room?.memberNames) ? room.memberNames : []),
+    ...(Array.isArray(room?.participantNames) ? room.participantNames : []),
     ...(Array.isArray(room?.members) ? room.members : []),
     ...(Array.isArray(room?.participants) ? room.participants : []),
     ...(Array.isArray(room?.users) ? room.users : []),
   ];
-  return values.map((item) => (
-    typeof item === 'string'
-      ? item
-      : item?.username || item?.userName || item?.handle || ''
-  )).filter(Boolean);
+  return values.map(readRoomPersonUsername).filter(Boolean);
 }
 
 function enrichChatRoomWithFriends(room, friendList = [], currentUser = {}) {
   const normalized = normalizeChatRoomValue(room);
   if (!normalized) return null;
-  if (normalized.directUsername || normalized.directNickname || normalized.displayName !== '채팅방') return normalized;
+  if (normalized.directUsername || normalized.directNickname || !isGenericChatRoomName(normalized.displayName)) return normalized;
 
   const currentKeys = new Set([currentUser?.username, currentUser?.email].filter(Boolean).map(normalizeFriendUsername));
   const usernames = getRoomParticipantUsernames(normalized)
