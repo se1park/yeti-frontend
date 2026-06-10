@@ -9,7 +9,7 @@
     "web": "expo start --web",
     "web:build": "expo export --platform web && node electron/patch-dist.js",
     "desktop": "npm run web:build && electron electron/main.js",
-    "desktop:dev": "set ELECTRON_START_URL=http://localhost:8081&& electron electron/main.js"
+    "desktop:dev": "cross-env ELECTRON_START_URL=http://localhost:8081 electron electron/main.js"
   },
   "dependencies": {
     "expo": "~54.0.33",
@@ -27,6 +27,7 @@
   },
   "private": true,
   "devDependencies": {
+    "cross-env": "^10.1.0",
     "electron": "^42.4.0"
   }
 }
