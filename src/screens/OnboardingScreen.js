@@ -8,12 +8,14 @@ import { BLUE, INK, LINE, MUTED } from '../data/yetiData';
 WebBrowser.maybeCompleteAuthSession();
 
 const googleClientId = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID || '';
+const googleClientSecret = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_SECRET || '';
 const kakaoRestApiKey = process.env.EXPO_PUBLIC_KAKAO_REST_API_KEY || '';
 const kakaoClientSecret = process.env.EXPO_PUBLIC_KAKAO_CLIENT_SECRET || '';
 const googleRedirectUri = process.env.EXPO_PUBLIC_GOOGLE_REDIRECT_URI || AuthSession.makeRedirectUri({ path: 'oauth/google/callback' });
 const kakaoRedirectUri = process.env.EXPO_PUBLIC_KAKAO_REDIRECT_URI || AuthSession.makeRedirectUri({ path: 'oauth/kakao/callback' });
 const googleDiscovery = {
   authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+  tokenEndpoint: 'https://oauth2.googleapis.com/token',
 };
 const kakaoDiscovery = {
   authorizationEndpoint: 'https://kauth.kakao.com/oauth/authorize',
@@ -72,7 +74,43 @@ async function exchangeKakaoCode(code) {
     throw new Error(payload.error_description || payload.error || 'Kakao 토큰을 받을 수 없습니다.');
   }
 
-  return payload.access_token;
+  return payload;
+}
+
+async function exchangeGoogleCode(code, codeVerifier) {
+  const body = new URLSearchParams({
+    grant_type: 'authorization_code',
+    client_id: googleClientId,
+    redirect_uri: googleRedirectUri,
+    code,
+  });
+
+  if (codeVerifier) {
+    body.set('code_verifier', codeVerifier);
+  }
+
+  if (googleClientSecret) {
+    body.set('client_secret', googleClientSecret);
+  }
+
+  const response = await fetch(googleDiscovery.tokenEndpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8',
+    },
+    body: body.toString(),
+  });
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const errorText = `${payload.error || ''} ${payload.error_description || ''}`;
+    if (errorText.includes('client_secret')) {
+      throw new Error('Google OAuth 클라이언트 보안 비밀번호가 필요합니다. .env에 EXPO_PUBLIC_GOOGLE_CLIENT_SECRET을 추가하거나, 백엔드에서 Google code를 token으로 교환하도록 변경해야 합니다.');
+    }
+    throw new Error(payload.error_description || payload.error || 'Google 토큰을 받을 수 없습니다.');
+  }
+
+  return payload;
 }
 
 function Logo({ size = 64 }) {
@@ -107,13 +145,14 @@ export function LoginScreen({ busy, error, notice, onEmailLogin, onOAuth, onSign
   const [username, setUsername] = useState('');
   const [nickname, setNickname] = useState('');
   const [socialError, setSocialError] = useState('');
+  const exchangedGoogleCodes = useRef(new Set());
   const exchangedKakaoCodes = useRef(new Set());
   const googleConfig = useMemo(() => ({
     clientId: googleClientId || 'missing-google-client-id',
     redirectUri: googleRedirectUri,
-    responseType: AuthSession.ResponseType.Token,
+    responseType: AuthSession.ResponseType.Code,
     scopes: ['openid', 'profile', 'email'],
-    usePKCE: false,
+    usePKCE: true,
   }), []);
   const kakaoConfig = useMemo(() => ({
     clientId: kakaoRestApiKey || 'missing-kakao-rest-api-key',
@@ -121,7 +160,7 @@ export function LoginScreen({ busy, error, notice, onEmailLogin, onOAuth, onSign
     responseType: AuthSession.ResponseType.Code,
     usePKCE: false,
   }), []);
-  const [, googleResponse, promptGoogle] = AuthSession.useAuthRequest(googleConfig, googleDiscovery);
+  const [googleRequest, googleResponse, promptGoogle] = AuthSession.useAuthRequest(googleConfig, googleDiscovery);
   const [, kakaoResponse, promptKakao] = AuthSession.useAuthRequest(kakaoConfig, kakaoDiscovery);
 
   const submit = () => {
@@ -138,22 +177,39 @@ export function LoginScreen({ busy, error, notice, onEmailLogin, onOAuth, onSign
   useEffect(() => {
     if (!googleResponse) return;
 
-    const googleToken = googleResponse.params?.access_token || googleResponse.authentication?.accessToken;
+    const runGoogleCodeLogin = async () => {
+      const googleCode = googleResponse.params?.code;
 
-    if (googleResponse.type === 'success' && googleToken) {
-      onOAuth('google', googleToken);
-      return;
-    }
+      if (googleResponse.type === 'success' && googleCode) {
+        if (exchangedGoogleCodes.current.has(googleCode)) return;
+        exchangedGoogleCodes.current.add(googleCode);
 
-    if (googleResponse.type === 'success' && !googleToken) {
-      setSocialError('Google OAuth 토큰을 받지 못했습니다. OAuth 클라이언트 설정을 확인해주세요.');
-      return;
-    }
+        try {
+          const googleTokenPayload = await exchangeGoogleCode(googleCode, googleRequest?.codeVerifier);
+          const googleToken = googleTokenPayload.access_token || googleTokenPayload.id_token;
+          if (!googleToken) {
+            setSocialError('Google OAuth 토큰을 받지 못했습니다. OAuth 클라이언트 설정을 확인해주세요.');
+            return;
+          }
+          onOAuth('google', googleToken);
+        } catch (googleError) {
+          setSocialError(googleError.message || 'Google 토큰 교환에 실패했습니다.');
+        }
+        return;
+      }
 
-    if (googleResponse.type === 'error') {
-      setSocialError('Google 로그인이 취소되었거나 실패했습니다.');
-    }
-  }, [googleResponse]);
+      if (googleResponse.type === 'success' && !googleCode) {
+        setSocialError('Google OAuth 코드를 받지 못했습니다. OAuth 클라이언트 설정을 확인해주세요.');
+        return;
+      }
+
+      if (googleResponse.type === 'error') {
+        setSocialError('Google 로그인이 취소되었거나 실패했습니다.');
+      }
+    };
+
+    runGoogleCodeLogin();
+  }, [googleResponse, googleRequest]);
 
   useEffect(() => {
     if (!kakaoResponse) return;
@@ -170,8 +226,12 @@ export function LoginScreen({ busy, error, notice, onEmailLogin, onOAuth, onSign
       exchangedKakaoCodes.current.add(kakaoCode);
 
       try {
-        const kakaoAccessToken = await exchangeKakaoCode(kakaoCode);
-        onOAuth('kakao', kakaoAccessToken);
+        const kakaoTokenPayload = await exchangeKakaoCode(kakaoCode);
+        onOAuth('kakao', [
+          kakaoTokenPayload.access_token,
+          kakaoTokenPayload.id_token,
+          kakaoCode,
+        ]);
       } catch (kakaoError) {
         setSocialError(kakaoError.message || 'Kakao 토큰 교환에 실패했습니다.');
       }

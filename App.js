@@ -373,19 +373,80 @@ function normalizeFriendUsername(value) {
 function normalizeChatRoomValue(room, index = 0) {
   if (!room || typeof room !== 'object') return null;
   const id = room.id || room.roomId || room.chatRoomId || room.uuid;
+  const memberCount = Number(room.memberCount ?? room.membersCount ?? room.member_count ?? 0);
+  const fallbackName = room.directNickname || room.friendNickname || room.directUsername || room.friendUsername || room.title || '채팅방';
   return {
     ...room,
     id: id || `${room.name || 'room'}-${index}`,
-    memberCount: Number(room.memberCount ?? room.membersCount ?? room.member_count ?? 0),
-    name: room.name || room.title || '채팅방',
+    displayName: room.displayName || (room.name && room.name !== '채팅방' ? room.name : fallbackName),
+    memberCount,
+    name: room.name || fallbackName,
     thumbnailUrl: room.thumbnailUrl || room.thumbnailURL || room.imageUrl || '',
     type: room.type || 'DM',
     unreadCount: Number(room.unreadCount ?? room.unread_count ?? room.unread ?? 0),
   };
 }
 
-function normalizeChatRooms(value) {
-  return toArray(value).map(normalizeChatRoomValue).filter(Boolean);
+function enrichDirectChatRoom(room, friend) {
+  const normalized = normalizeChatRoomValue(room);
+  if (!normalized) return null;
+  const username = getFriendUsername(friend);
+  const nickname = friend?.nickname || friend?.name || username;
+  const isGenericName = !normalized.name || normalized.name === '채팅방';
+  return {
+    ...normalized,
+    directNickname: nickname,
+    directUsername: username,
+    displayName: nickname || normalized.displayName || normalized.name,
+    memberCount: Math.max(Number(normalized.memberCount || 0), 2),
+    name: isGenericName ? (nickname || normalized.name) : normalized.name,
+    peer: friend || normalized.peer,
+    type: normalized.type || 'DIRECT',
+  };
+}
+
+function getRoomParticipantUsernames(room) {
+  const values = [
+    ...(Array.isArray(room?.memberUsernames) ? room.memberUsernames : []),
+    ...(Array.isArray(room?.participantUsernames) ? room.participantUsernames : []),
+    ...(Array.isArray(room?.members) ? room.members : []),
+    ...(Array.isArray(room?.participants) ? room.participants : []),
+    ...(Array.isArray(room?.users) ? room.users : []),
+  ];
+  return values.map((item) => (
+    typeof item === 'string'
+      ? item
+      : item?.username || item?.userName || item?.handle || ''
+  )).filter(Boolean);
+}
+
+function enrichChatRoomWithFriends(room, friendList = [], currentUser = {}) {
+  const normalized = normalizeChatRoomValue(room);
+  if (!normalized) return null;
+  if (normalized.directUsername || normalized.directNickname || normalized.displayName !== '채팅방') return normalized;
+
+  const currentKeys = new Set([currentUser?.username, currentUser?.email].filter(Boolean).map(normalizeFriendUsername));
+  const usernames = getRoomParticipantUsernames(normalized)
+    .map(normalizeFriendUsername)
+    .filter((username) => username && !currentKeys.has(username));
+  let peer = friendList.find((friend) => usernames.includes(normalizeFriendUsername(getFriendUsername(friend))));
+  const isDirectRoom = ['DM', 'DIRECT'].includes(String(normalized.type || '').toUpperCase());
+  if (!peer && !usernames.length && isDirectRoom && friendList.length === 1) {
+    peer = friendList[0];
+  }
+  if (!peer && !usernames.length) return normalized;
+
+  const username = getFriendUsername(peer) || usernames[0];
+  const nickname = peer?.nickname || peer?.name || username;
+  return enrichDirectChatRoom({
+    ...normalized,
+    directNickname: nickname,
+    directUsername: username,
+  }, peer || { username, nickname });
+}
+
+function normalizeChatRooms(value, friendList = [], currentUser = {}) {
+  return toArray(value).map((room) => enrichChatRoomWithFriends(room, friendList, currentUser)).filter(Boolean);
 }
 
 function normalizeChatMessageValue(message, index = 0) {
@@ -401,14 +462,23 @@ function normalizeChatMessageValue(message, index = 0) {
     messageType: message.messageType || message.type || 'TEXT',
     reactions: message.reactions || '',
     replyToId: message.replyToId || message.reply_to_id || null,
-    senderId: message.senderId || message.sender_id || '',
+    senderId: message.senderId || message.sender_id || message.userId || message.sender?.id || '',
     senderNickname: message.senderNickname || message.senderName || message.nickname || '',
     senderProfileUrl: message.senderProfileUrl || message.senderProfileURL || message.senderProfileImageUrl || '',
+    senderUsername: message.senderUsername || message.senderUserName || message.username || message.sender?.username || '',
   };
 }
 
+function sortChatMessages(messages) {
+  return [...messages].sort((a, b) => {
+    const aTime = new Date(a.createdAt || 0).getTime();
+    const bTime = new Date(b.createdAt || 0).getTime();
+    return aTime - bTime;
+  });
+}
+
 function normalizeChatMessages(value) {
-  return toArray(value).map(normalizeChatMessageValue).filter(Boolean);
+  return sortChatMessages(toArray(value).map(normalizeChatMessageValue).filter(Boolean));
 }
 
 function mergeChatMessages(previous, incoming) {
@@ -416,11 +486,7 @@ function mergeChatMessages(previous, incoming) {
   [...previous, ...toArray(incoming).map(normalizeChatMessageValue).filter(Boolean)].forEach((message) => {
     if (message?.id) map.set(message.id, { ...(map.get(message.id) || {}), ...message });
   });
-  return Array.from(map.values()).sort((a, b) => {
-    const aTime = new Date(a.createdAt || 0).getTime();
-    const bTime = new Date(b.createdAt || 0).getTime();
-    return aTime - bTime;
-  });
+  return sortChatMessages(Array.from(map.values()));
 }
 
 function getFriendRequestUsername(value) {
@@ -605,7 +671,11 @@ export default function App() {
         setSchedules(normalizeScheduleList(scheduleResult.value));
       }
       if (friendResult.status === 'fulfilled') {
-        setFriends(toArray(friendResult.value));
+        const normalizedFriends = toArray(friendResult.value);
+        setFriends(normalizedFriends);
+        if (roomResult.status === 'fulfilled') {
+          setChatRooms(normalizeChatRooms(roomResult.value, normalizedFriends, session?.user));
+        }
       }
       if (requestResult.status === 'fulfilled') {
         setFriendRequests(toArray(requestResult.value));
@@ -613,8 +683,8 @@ export default function App() {
       if (invitationResult.status === 'fulfilled') {
         setScheduleInvitations(normalizeScheduleInvitations(invitationResult.value));
       }
-      if (roomResult.status === 'fulfilled') {
-        setChatRooms(normalizeChatRooms(roomResult.value));
+      if (roomResult.status === 'fulfilled' && friendResult.status !== 'fulfilled') {
+        setChatRooms(normalizeChatRooms(roomResult.value, friends, session?.user));
       }
       if (notificationResult.status === 'fulfilled') {
         setNotifications(toArray(notificationResult.value));
@@ -646,8 +716,8 @@ export default function App() {
   const refreshChatRooms = useCallback(async () => {
     if (!session?.accessToken || session.newUser) return;
     const rooms = await runWithProtectedToken((token) => getChatRooms(token));
-    setChatRooms(normalizeChatRooms(rooms));
-  }, [runWithProtectedToken, session?.accessToken, session?.newUser]);
+    setChatRooms(normalizeChatRooms(rooms, friends, session?.user));
+  }, [friends, runWithProtectedToken, session?.accessToken, session?.newUser, session?.user]);
 
   const refreshNotifications = useCallback(async () => {
     if (!session?.accessToken || session.newUser) return;
@@ -1399,15 +1469,16 @@ export default function App() {
   };
 
   const handleOpenChatRoom = async (room) => {
+    const normalizedRoom = normalizeChatRoomValue(room);
     chatSocketRef.current?.deactivate?.();
     chatSocketRef.current = null;
-    setSelectedRoom(room);
+    setSelectedRoom(normalizedRoom);
     setChatMessages([]);
-    setChatConnection(room?.id ? { status: 'connecting', message: '' } : { status: 'disconnected', message: '' });
-    if (room?.id) {
+    setChatConnection(normalizedRoom?.id ? { status: 'connecting', message: '' } : { status: 'disconnected', message: '' });
+    if (normalizedRoom?.id) {
       try {
         const token = await getProtectedToken();
-        setChatMessages(normalizeChatMessages(await getChatMessages(room.id, token, { size: 50 })));
+        setChatMessages(normalizeChatMessages(await getChatMessages(normalizedRoom.id, token, { size: 50 })));
       } catch (error) {
         setApiError(error.message || '채팅 메시지를 불러오지 못했습니다.');
       }
@@ -1420,13 +1491,13 @@ export default function App() {
           setChatConnection({ status, message: message || '' });
           if (status === 'error') setApiError(message || '채팅 서버 연결에 실패했습니다.');
         },
-        roomId: room.id,
+        roomId: normalizedRoom.id,
       });
     }
     goTo('chatRoom');
   };
 
-  const handleCreateChatRoom = async (body) => {
+  const handleCreateChatRoom = async (body, context = {}) => {
     const createWithFallback = async (token) => {
       try {
         return await createChatRoom(body, token);
@@ -1438,10 +1509,19 @@ export default function App() {
         return createChatRoom({ ...body, type: fallbackType }, token);
       }
     };
-    const created = normalizeChatRoomValue(unwrapApiValue(await runWithProtectedToken(createWithFallback)));
+    const rawCreated = normalizeChatRoomValue(unwrapApiValue(await runWithProtectedToken(createWithFallback)));
+    const created = context.friend ? enrichDirectChatRoom(rawCreated, context.friend) : rawCreated;
     try {
       const rooms = await runWithProtectedToken((token) => getChatRooms(token));
-      setChatRooms(normalizeChatRooms(rooms));
+      const normalizedRooms = normalizeChatRooms(rooms, friends, session?.user);
+      if (created?.id) {
+        setChatRooms([
+          created,
+          ...normalizedRooms.filter((room) => room.id !== created.id),
+        ]);
+      } else {
+        setChatRooms(normalizedRooms);
+      }
     } catch {
       if (created?.id) {
         setChatRooms((previous) => [
@@ -1466,7 +1546,7 @@ export default function App() {
         type: 'DIRECT',
         name: friend?.nickname || friend?.name || username,
         memberUsernames: [username],
-      });
+      }, { friend });
       await handleOpenChatRoom(room);
     } catch (error) {
       setApiError(error.message || '채팅방을 만들지 못했습니다.');
@@ -1538,8 +1618,8 @@ export default function App() {
         />
       );
     }
-    if (screen === 'chat') return <ChatListScreen apiError={apiError} goTo={goTo} onCreateRoom={handleCreateChatRoom} onOpenRoom={handleOpenChatRoom} rooms={chatRooms} />;
-    if (screen === 'chatRoom') return <ChatRoomScreen chatStatus={chatConnection} goTo={goTo} goBack={goBack} messages={chatMessages} onCreateMediaUpload={handleCreateMediaUpload} onDeleteMessage={handleDeleteMessage} onReactMessage={handleReactMessage} onSendMessage={handleSendChatMessage} room={selectedRoom} />;
+    if (screen === 'chat') return <ChatListScreen apiError={apiError} currentUser={session?.user} goTo={goTo} onCreateRoom={handleCreateChatRoom} onOpenRoom={handleOpenChatRoom} rooms={chatRooms} />;
+    if (screen === 'chatRoom') return <ChatRoomScreen chatStatus={chatConnection} currentUser={session?.user} goTo={goTo} goBack={goBack} messages={chatMessages} onCreateMediaUpload={handleCreateMediaUpload} onDeleteMessage={handleDeleteMessage} onReactMessage={handleReactMessage} onSendMessage={handleSendChatMessage} room={selectedRoom} />;
     if (screen === 'friends') return <FriendsScreen apiError={apiError} friendRequests={friendRequests} friends={friends} goTo={goTo} onBlockFriend={handleBlockFriend} onDeleteFriend={handleDeleteFriend} onOpenFriend={handleOpenFriendProfile} onRequestAction={handleFriendRequestAction} onSearchUsers={handleSearchUsers} onSendRequest={handleSendFriendRequest} />;
     if (screen === 'studyNote') return <StudyNoteScreen apiError={apiError} goBack={goBack} notes={studyNotes} onCreateNote={handleCreateStudyNote} onSummarizeNote={handleSummarizeStudyNote} schedule={selectedSchedule || visibleSchedules[0]} />;
     if (screen === 'notices') return <NotificationsScreen apiBusy={apiBusy} apiError={apiError} goBack={goBack} invitations={scheduleInvitations} notifications={notifications} onInvitationAction={handleScheduleInvitationAction} onMarkAllRead={handleMarkAllNotificationsRead} onMarkRead={handleMarkNotificationRead} />;

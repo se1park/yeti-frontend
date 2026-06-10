@@ -229,11 +229,12 @@ function normalizeSession(payload) {
   const refreshToken = readToken(payload, 'refreshToken') || readToken(payload, 'refresh_token');
   const tokenClaims = decodeJwtPayload(accessToken);
   const user = readUser(payload, tokenClaims);
+  const newUserValue = payload?.newUser ?? payload?.data?.newUser ?? payload?.result?.newUser ?? payload?.user?.newUser ?? payload?.data?.user?.newUser ?? payload?.result?.user?.newUser;
 
   return {
     accessToken,
     refreshToken,
-    newUser: Boolean(payload?.newUser ?? payload?.data?.newUser),
+    newUser: newUserValue === true || newUserValue === 'true',
     plan: payload?.plan || payload?.data?.plan || null,
     user,
     raw: payload,

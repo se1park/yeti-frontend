@@ -98,15 +98,17 @@ function createWindow() {
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    const isAuthSessionBootstrap = url === 'about:blank';
     const isOAuthUrl = [
       'accounts.google.com',
+      'oauth2.googleapis.com',
       'kauth.kakao.com',
       'kakao.com',
       'localhost:8081/oauth',
       '127.0.0.1:8081/oauth',
     ].some((host) => url.includes(host));
 
-    if (isOAuthUrl) {
+    if (isAuthSessionBootstrap || isOAuthUrl) {
       return {
         action: 'allow',
         overrideBrowserWindowOptions: {
@@ -120,6 +122,7 @@ function createWindow() {
             contextIsolation: true,
             nodeIntegration: false,
             sandbox: true,
+            webSecurity: !isDev,
           },
           width: 520,
         },

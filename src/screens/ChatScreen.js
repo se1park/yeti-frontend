@@ -4,22 +4,90 @@ import { Plus, Search } from 'lucide-react-native';
 import { Avatar, Card, Pill, PrimaryButton, Screen } from '../components/ui';
 import { BLUE, INK, LINE, MUTED } from '../data/yetiData';
 
-function normalizeRoom(room, index) {
+function userKeys(user) {
+  return [
+    user?.id,
+    user?.userId,
+    user?.sub,
+    user?.username,
+    user?.email,
+  ].filter(Boolean).map((value) => String(value).replace(/^@/, '').toLowerCase());
+}
+
+function isCurrentUserMessage(message, currentUser) {
+  const keys = userKeys(currentUser);
+  if (!keys.length) return false;
+  return [
+    message?.senderId,
+    message?.userId,
+    message?.senderUsername,
+    message?.username,
+    message?.senderEmail,
+  ].filter(Boolean).some((value) => keys.includes(String(value).replace(/^@/, '').toLowerCase()));
+}
+
+function getRoomMembers(room) {
+  return [
+    ...(Array.isArray(room?.members) ? room.members : []),
+    ...(Array.isArray(room?.participants) ? room.participants : []),
+    ...(Array.isArray(room?.users) ? room.users : []),
+  ];
+}
+
+function getPeerFromRoom(room, currentUser) {
+  const keys = userKeys(currentUser);
+  const directPeer = {
+    nickname: room?.directNickname || room?.friendNickname || '',
+    username: room?.directUsername || room?.friendUsername || '',
+    profileImageUrl: room?.directProfileImageUrl || room?.friendProfileImageUrl || '',
+  };
+  if (directPeer.nickname || directPeer.username) return directPeer;
+
+  return getRoomMembers(room).find((member) => {
+    const memberKeys = userKeys(member);
+    return memberKeys.length && !memberKeys.some((key) => keys.includes(key));
+  }) || null;
+}
+
+function getPeerName(peer) {
+  return peer?.username || peer?.nickname || peer?.name || peer?.displayName || '';
+}
+
+function getAvatarLabel(value) {
+  const normalized = String(value || '').trim().replace(/^@/, '');
+  return (normalized || '채팅').slice(0, 2).toLowerCase();
+}
+
+function normalizeRoom(room, index, currentUser) {
+  const peer = getPeerFromRoom(room, currentUser);
+  const peerName = getPeerName(peer);
+  const serverName = room.name && room.name !== '채팅방' ? room.name : '';
+  const directTitle = room.directUsername || room.friendUsername || peerName;
+  const title = directTitle || room.displayName || room.directNickname || serverName || '채팅방';
+  const username = room.directUsername || room.friendUsername || peer?.username || '';
   return {
     id: room.id || `${room.name}-${index}`,
-    title: room.name || '채팅방',
-    preview: `${room.type || 'CHAT'} · 멤버 ${room.memberCount || 0}명`,
+    title,
+    preview: username ? `@${username}` : `${room.type || 'CHAT'} · 멤버 ${room.memberCount || 0}명`,
     time: room.createdAt ? new Date(room.createdAt).toLocaleDateString() : '',
     unread: room.unreadCount ? String(room.unreadCount) : '',
-    avatars: [(room.name || '채').slice(0, 1)],
+    avatars: [getAvatarLabel(username || title)],
     chip: room.type,
     raw: room,
   };
 }
 
-export function ChatListScreen({ apiError, goTo, onCreateRoom, onOpenRoom, rooms }) {
+export function ChatListScreen({ apiError, currentUser, goTo, onCreateRoom, onOpenRoom, rooms }) {
   const [createVisible, setCreateVisible] = useState(false);
-  const displayRooms = (rooms || []).map(normalizeRoom);
+  const [activeSegment, setActiveSegment] = useState('전체');
+  const allRooms = (rooms || []).map((room, index) => normalizeRoom(room, index, currentUser));
+  const displayRooms = allRooms.filter((room) => {
+    const type = String(room.raw?.type || room.chip || '').toUpperCase();
+    if (activeSegment === '1:1') return ['DIRECT', 'DM'].includes(type);
+    if (activeSegment === '그룹') return type === 'GROUP';
+    if (activeSegment === '안 읽음') return Number(room.raw?.unreadCount || room.unread || 0) > 0;
+    return true;
+  });
 
   return (
     <View style={styles.flex}>
@@ -37,7 +105,9 @@ export function ChatListScreen({ apiError, goTo, onCreateRoom, onOpenRoom, rooms
         </View>
         <View style={styles.segment}>
           {['전체', '1:1', '그룹', '안 읽음'].map((item, index) => (
-            <Text key={item} style={[styles.segmentItem, index === 0 && styles.segmentActive]}>{item}</Text>
+            <Pressable key={item} accessibilityRole="button" onPress={() => setActiveSegment(item)}>
+              <Text style={[styles.segmentItem, (activeSegment === item || (!activeSegment && index === 0)) && styles.segmentActive]}>{item}</Text>
+            </Pressable>
           ))}
         </View>
         <View style={styles.chatGrid}>
@@ -89,10 +159,13 @@ export function ChatListScreen({ apiError, goTo, onCreateRoom, onOpenRoom, rooms
   );
 }
 
-export function ChatRoomScreen({ chatStatus, goTo, goBack, messages, onCreateMediaUpload, onDeleteMessage, onReactMessage, onSendMessage, room }) {
+export function ChatRoomScreen({ chatStatus, currentUser, goTo, goBack, messages, onCreateMediaUpload, onDeleteMessage, onReactMessage, onSendMessage, room }) {
   const [notice, setNotice] = useState('');
   const [draft, setDraft] = useState('');
-  const roomTitle = room?.name || '채팅방';
+  const peer = getPeerFromRoom(room, currentUser);
+  const peerName = getPeerName(peer);
+  const roomTitle = room?.directUsername || peer?.username || peerName || room?.displayName || room?.directNickname || (room?.name !== '채팅방' ? room?.name : '') || '채팅방';
+  const roomSubtitle = room?.directUsername || peer?.username ? `@${room.directUsername || peer.username}` : room?.type || '';
   const connected = chatStatus?.status === 'connected';
   const statusLabel = {
     connected: '실시간 연결됨',
@@ -126,7 +199,7 @@ export function ChatRoomScreen({ chatStatus, goTo, goBack, messages, onCreateMed
       left="‹"
       onBack={goBack}
       title={roomTitle}
-      subtitle={room?.type || ''}
+      subtitle={roomSubtitle}
       bottom={(
         <View style={styles.chatComposer}>
           <TextInput
@@ -152,19 +225,22 @@ export function ChatRoomScreen({ chatStatus, goTo, goBack, messages, onCreateMed
         {chatStatus?.message ? <Text numberOfLines={1} style={styles.statusMessage}>{chatStatus.message}</Text> : null}
       </View>
       {notice ? <Text style={styles.errorText}>{notice}</Text> : null}
-      {(messages || []).length ? messages.map((item) => (
-        <View key={item.id} style={styles.messageBlock}>
-          <Bubble side="left">{item.deleted ? '삭제된 메시지입니다.' : item.content || item.messageType}</Bubble>
-          <View style={styles.messageActions}>
-            <Text style={styles.time}>{item.senderNickname || '사용자'} · {item.createdAt ? new Date(item.createdAt).toLocaleTimeString() : ''}</Text>
+      {(messages || []).length ? messages.map((item) => {
+        const mine = isCurrentUserMessage(item, currentUser);
+        return (
+        <View key={item.id} style={[styles.messageBlock, mine && styles.messageBlockMine]}>
+          <Bubble side={mine ? 'right' : 'left'}>{item.deleted ? '삭제된 메시지입니다.' : item.content || item.messageType}</Bubble>
+          <View style={[styles.messageActions, mine && styles.messageActionsMine]}>
+            <Text style={styles.time}>{mine ? '나' : item.senderNickname || item.senderUsername || roomTitle} · {item.createdAt ? new Date(item.createdAt).toLocaleTimeString() : ''}</Text>
             <Text onPress={() => onReactMessage?.(item.id, '👍')} style={styles.actionText}>👍</Text>
-            <Text onPress={() => onDeleteMessage?.(item.id)} style={styles.deleteText}>삭제</Text>
+            {mine ? <Text onPress={() => onDeleteMessage?.(item.id)} style={styles.deleteText}>삭제</Text> : null}
           </View>
         </View>
-      )) : (
+        );
+      }) : (
         <Card style={styles.emptyCard}>
           <Text style={styles.emptyTitle}>메시지가 없습니다</Text>
-          <Text style={styles.emptyText}>현재 서버에는 메시지 조회, 리액션, 삭제 API만 제공됩니다.</Text>
+          <Text style={styles.emptyText}>첫 메시지를 보내 대화를 시작하세요.</Text>
         </Card>
       )}
     </Screen>
@@ -285,7 +361,9 @@ const styles = StyleSheet.create({
   bubbleText: { color: INK, fontSize: 13, fontWeight: '700', lineHeight: 19 },
   bubbleTextRight: { color: '#ffffff' },
   messageBlock: { marginBottom: 10 },
+  messageBlockMine: { alignItems: 'flex-end' },
   messageActions: { alignItems: 'center', flexDirection: 'row', gap: 12, marginBottom: 4 },
+  messageActionsMine: { justifyContent: 'flex-end' },
   actionText: { color: BLUE, fontSize: 13, fontWeight: '900' },
   deleteText: { color: '#f04454', fontSize: 12, fontWeight: '900' },
   chatComposer: {
